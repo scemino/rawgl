@@ -4,6 +4,7 @@
 #include "gfx.h"
 #include "game.h"
 #include "graphics.h"
+#include "graphics_sokol.h"
 #include "mixer.h"
 #include "resource.h"
 #include "resource_nth.h"
@@ -37,8 +38,9 @@ public:
     Resource _res;
     Video _vid;
     SfxPlayer _ply;
+    Mixer _mix;
     Script _script;
-    Graphics *_graphics;
+    GraphicsSokol _graphics;
     SokolSystem _sys;
     int _state;
     int _part_num;
@@ -48,8 +50,8 @@ public:
     _res(&_vid, dataDir),
     _vid(&_res),
     _ply(&_res),
-    _script(NULL, &_res, &_ply, &_vid),
-    _graphics(NULL) {
+    _mix(&_ply),
+    _script(&_mix, &_res, &_ply, &_vid) {
     }
 };
 
@@ -94,8 +96,9 @@ void game_init(game_t* game, const game_desc_t* desc) {
 		_state->_res._nth->getBitmapSize(&w, &h);
 	}
 	debug(DBG_INFO, "Using sokol graphics");
-    _state->_vid._graphics = _state->_graphics = GraphicsSokol_create(&_state->_sys);
-    _state->_graphics->init(w, h);
+    _state->_vid._graphics = &_state->_graphics;
+    _state->_graphics.setSystem(&_state->_sys);
+    _state->_graphics.init(w, h);
 	if (isNth) {
 		_state->_res.loadFont();
 		_state->_res.loadHeads();
@@ -136,9 +139,11 @@ void game_init(game_t* game, const game_desc_t* desc) {
         mixerType = kMixerTypeAiff;
         break;
     }
+    _state->_mix.init(mixerType);
+
     Video::_useEGA = desc->use_ega;
     // bypass protection ?
-    if(!desc->bypass_protection) {
+#ifndef BYPASS_PROTECTION
         switch (_state->_res.getDataType()) {
         case Resource::DT_DOS:
             if (!_state->_res._hasPasswordScreen) {
@@ -153,7 +158,7 @@ void game_init(game_t* game, const game_desc_t* desc) {
         default:
             break;
         }
-    }
+#endif
 	if (_state->_res.getDataType() == Resource::DT_3DO && _state->_part_num == kPartIntro) {
 		_state->_state = kStateLogo3DO;
 	} else {
@@ -168,9 +173,18 @@ void game_init(game_t* game, const game_desc_t* desc) {
     game->title = _state->_res.getGameTitle(lang);
 }
 
-void game_exec(game_t* game) {
+void game_exec(game_t* game, uint32_t ms) {
     GAME_ASSERT(game && game->valid);
     (void)game;
+    _state->_sys._elapsed += ms;
+    if(_state->_sys._sleep) {
+        if(ms > _state->_sys._sleep) {
+            _state->_sys._sleep = 0;
+        } else {
+            _state->_sys._sleep -= ms;
+        }
+        return;
+    }
 	switch (_state->_state) {
     // TODO: 3DO
 	// case kStateLogo3DO:
@@ -188,9 +202,8 @@ void game_exec(game_t* game) {
 	case kStateGame:
 		_state->_script.setupTasks();
 		_state->_script.updateInput();
-		//processInput();
 		_state->_script.runTasks();
-		//_state->_mix.update();
+		_state->_mix.update();
 		if (_state->_res.getDataType() == Resource::DT_3DO) {
 			switch (_state->_res._nextPart) {
 			case 16009:
@@ -208,6 +221,10 @@ void game_exec(game_t* game) {
 void game_cleanup(game_t* game) {
     GAME_ASSERT(game && game->valid);
     (void)game;
+    _state->_graphics.fini();
+	_state->_ply.stop();
+	_state->_mix.quit();
+	_state->_res.freeMemBlock();
     delete _state;
 }
 
@@ -237,6 +254,36 @@ gfx_display_info_t game_display_info(game_t* game) {
         }
     };
     return res;
+}
+
+void game_key_down(game_t* game, game_input_t input) {
+    (void)game;
+    switch(input) {
+        case GAME_INPUT_LEFT:   _state->_sys._pi.dirMask |= PlayerInput::DIR_LEFT; break;
+        case GAME_INPUT_RIGHT:  _state->_sys._pi.dirMask |= PlayerInput::DIR_RIGHT; break;
+        case GAME_INPUT_UP:     _state->_sys._pi.dirMask |= PlayerInput::DIR_UP; break;
+        case GAME_INPUT_DOWN:   _state->_sys._pi.dirMask |= PlayerInput::DIR_DOWN; break;
+        case GAME_INPUT_JUMP:   _state->_sys._pi.jump = true; break;
+        case GAME_INPUT_ACTION: _state->_sys._pi.action = true; break;
+        case GAME_INPUT_BACK:   _state->_sys._pi.back = true; break;
+        case GAME_INPUT_CODE:   _state->_sys._pi.code = true; break;
+        case GAME_INPUT_PAUSE:  _state->_sys._pi.pause = true; break;
+    }
+}
+
+void game_key_up(game_t* game, game_input_t input) {
+    (void)game;
+    switch(input) {
+        case GAME_INPUT_LEFT:   _state->_sys._pi.dirMask &= ~PlayerInput::DIR_LEFT; break;
+        case GAME_INPUT_RIGHT:  _state->_sys._pi.dirMask &= ~PlayerInput::DIR_RIGHT; break;
+        case GAME_INPUT_UP:     _state->_sys._pi.dirMask &= ~PlayerInput::DIR_UP; break;
+        case GAME_INPUT_DOWN:   _state->_sys._pi.dirMask &= ~PlayerInput::DIR_DOWN; break;
+        case GAME_INPUT_JUMP:   _state->_sys._pi.jump = false; break;
+        case GAME_INPUT_ACTION: _state->_sys._pi.action = false; break;
+        case GAME_INPUT_BACK:   _state->_sys._pi.back = false; break;
+        case GAME_INPUT_CODE:   _state->_sys._pi.code = false; break;
+        case GAME_INPUT_PAUSE:  _state->_sys._pi.pause = false; break;
+    }
 }
 
 #ifdef __cplusplus

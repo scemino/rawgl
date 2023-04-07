@@ -1,63 +1,13 @@
 
 #include <math.h>
+#include "graphics_sokol.h"
 #include "graphics.h"
 #include "util.h"
 #include "screenshot.h"
 #include "systemstub.h"
+#include "sokol_sys.h"
 
-
-struct GraphicsSokol: Graphics {
-	typedef void (GraphicsSokol::*drawLine)(int16_t x1, int16_t x2, int16_t y, uint8_t col);
-
-	uint8_t *_pagePtrs[4];
-	uint8_t *_drawPagePtr;
-	int _u, _v;
-	int _w, _h;
-	int _byteDepth;
-	Color _pal[16];
-    uint32_t _palette[16];
-	uint8_t *_colorBuffer;
-	int _screenshotNum;
-    SystemStub *_stub;
-
-	GraphicsSokol(SystemStub *stub);
-	~GraphicsSokol();
-
-	int xScale(int x) const { return (x * _u) >> 16; }
-	int yScale(int y) const { return (y * _v) >> 16; }
-
-	void setSize(int w, int h);
-	void drawPolygon(uint8_t color, const QuadStrip &qs);
-	void drawChar(uint8_t c, uint16_t x, uint16_t y, uint8_t color);
-	void drawSpriteMask(int x, int y, uint8_t color, const uint8_t *data);
-	void drawPoint(int16_t x, int16_t y, uint8_t color);
-	void drawLineT(int16_t x1, int16_t x2, int16_t y, uint8_t color);
-	void drawLineN(int16_t x1, int16_t x2, int16_t y, uint8_t color);
-	void drawLineP(int16_t x1, int16_t x2, int16_t y, uint8_t color);
-	uint8_t *getPagePtr(uint8_t page);
-	int getPageSize() const { return _w * _h * _byteDepth; }
-	void setWorkPagePtr(uint8_t page);
-
-	virtual void init(int targetW, int targetH);
-
-	virtual void setFont(const uint8_t *src, int w, int h);
-	virtual void setPalette(const Color *colors, int count);
-	virtual void setSpriteAtlas(const uint8_t *src, int w, int h, int xSize, int ySize);
-	virtual void drawSprite(int buffer, int num, const Point *pt, uint8_t color);
-	virtual void drawBitmap(int buffer, const uint8_t *data, int w, int h, int fmt);
-	virtual void drawPoint(int buffer, uint8_t color, const Point *pt);
-	virtual void drawQuadStrip(int buffer, uint8_t color, const QuadStrip *qs);
-	virtual void drawStringChar(int buffer, uint8_t color, char c, const Point *pt);
-	virtual void clearBuffer(int num, uint8_t color);
-	virtual void copyBuffer(int dst, int src, int vscroll = 0);
-	virtual void drawBuffer(int num, SystemStub *stub);
-	virtual void drawRect(int num, uint8_t color, const Point *pt, int w, int h);
-	virtual void drawBitmapOverlay(const uint8_t *data, int w, int h, int fmt, SystemStub *stub);
-};
-
-
-GraphicsSokol::GraphicsSokol(SystemStub *stub)
-: _stub(stub) {
+GraphicsSokol::GraphicsSokol() {
 	_fixUpPalette = FIXUP_PALETTE_NONE;
 	memset(_pagePtrs, 0, sizeof(_pagePtrs));
 	_colorBuffer = 0;
@@ -452,7 +402,7 @@ void GraphicsSokol::drawBuffer(int num, SystemStub *stub) {
 		if (0) {
 			dumpPalette(_colorBuffer, _w, _pal);
 		}
-        stub->setScreenPixels(_colorBuffer, _w, _h);
+        _stub->setScreenPixels(_colorBuffer, _w, _h);
         // TODO: ?
         // if (_screenshot) {
 		// 	dumpBuffer555(_colorBuffer, _w, _h, _screenshotNum);
@@ -496,8 +446,4 @@ void GraphicsSokol::drawBitmapOverlay(const uint8_t *data, int w, int h, int fmt
 		stub->setScreenPixels555((const uint16_t *)data, w, h);
 		stub->updateScreen();
 	}
-}
-
-Graphics *GraphicsSokol_create(SystemStub *stub) {
-	return new GraphicsSokol(stub);
 }

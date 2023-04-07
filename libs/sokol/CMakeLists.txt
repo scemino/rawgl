@@ -4,6 +4,7 @@ endif()
 
 # the general sokol implementations library (compiled as C, C++ or ObjC depending on platform)
 fips_begin_lib(sokol)
+    fips_files(clock.c)
     if (FIPS_OSX)
         fips_files(sokol.m)
         fips_frameworks_osx(Foundation)

@@ -9,16 +9,17 @@ void SokolSystem::setBuffer(uint8_t* fb, uint32_t* palette) {
     _palette = palette;
 }
 
-void SokolSystem::init(const char *title, const DisplayMode *dm) {}
+void SokolSystem::init(const char *title, const DisplayMode *dm) {
+    _elapsed = 0;
+    _sleep = 0;
+}
 
 void SokolSystem::fini() {}
 
-// GL rendering
 void SokolSystem::prepareScreen(int &w, int &h, float ar[4]) {}
 
 void SokolSystem::updateScreen() {}
 
-// framebuffer rendering
 void SokolSystem::setScreenPixels555(const uint16_t *data, int w, int h) {
     uint32_t* fb = (uint32_t*)_fb;
     for(int i=0; i<w*h; i++) {
@@ -33,11 +34,13 @@ void SokolSystem::setScreenPixels(const uint8_t *data, int w, int h) {
 }
 
 void SokolSystem::setPalette(const uint32_t *data) {
-    memcpy(_palette, data, 16*sizeof(uint32_t));
+    memcpy(_palette, data, 16 * sizeof(uint32_t));
 }
 
 void SokolSystem::processEvents() {}
 
-void SokolSystem::sleep(uint32_t duration) {}
+void SokolSystem::sleep(uint32_t duration) {
+    _sleep += duration;
+}
 
-uint32_t SokolSystem::getTimeStamp() {}
+uint32_t SokolSystem::getTimeStamp() { return _elapsed; }

@@ -70,6 +70,5 @@ struct Graphics {
 
 Graphics *GraphicsGL_create();
 Graphics *GraphicsSoft_create();
-Graphics *GraphicsSokol_create(SystemStub *stub);
 
 #endif

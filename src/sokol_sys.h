@@ -18,4 +18,6 @@ struct SokolSystem: SystemStub {
 
     uint8_t* _fb;
     uint32_t* _palette;
+    uint32_t _elapsed;
+    uint32_t _sleep;
 };

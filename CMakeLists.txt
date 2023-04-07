@@ -9,6 +9,7 @@ include("${FIPS_ROOT_DIR}/cmake/fips.cmake")
 
 include_directories(src)
 include_directories(libs/gfx)
+include_directories(libs/sokol)
 fips_setup()
 
 #  platform selection
