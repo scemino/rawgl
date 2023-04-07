@@ -1,7 +1,9 @@
 
 #include <time.h>
 #include <sys/stat.h>
+#if !defined(__EMSCRIPTEN__)
 #include <zlib.h>
+#endif
 #include "pak.h"
 #include "resource_nth.h"
 #include "util.h"
@@ -209,6 +211,7 @@ struct Resource15th: ResourceNth {
 };
 
 static uint8_t *inflateGzip(const char *filepath) {
+#if !defined(__EMSCRIPTEN__)
 	File f;
 	if (!f.open(filepath)) {
 		warning("Unable to open '%s'", filepath);
@@ -249,6 +252,7 @@ static uint8_t *inflateGzip(const char *filepath) {
 		}
 	}
 	free(out);
+#endif
 	return 0;
 }
 

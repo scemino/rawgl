@@ -57,6 +57,8 @@ struct SystemStub {
 	virtual void prepareScreen(int &w, int &h, float ar[4]) = 0;
 	virtual void updateScreen() = 0;
 	// framebuffer rendering
+    virtual void setScreenPixels(const uint8_t *data, int w, int h) = 0;
+    virtual void setPalette(const uint32_t *data) = 0;
 	virtual void setScreenPixels555(const uint16_t *data, int w, int h) = 0;
 
 	virtual void processEvents() = 0;
