@@ -63,6 +63,7 @@ void game_exec(game_t* game, uint32_t micro_seconds);
 void game_cleanup(game_t* game);
 void game_key_down(game_t* game, game_input_t input);
 void game_key_up(game_t* game, game_input_t input);
+void game_char_pressed(game_t* game, int c);
 
 #ifdef __cplusplus
 } /* extern "C" */

@@ -295,6 +295,10 @@ void game_key_up(game_t* game, game_input_t input) {
     }
 }
 
+void game_char_pressed(game_t* game, int c) {
+    _state->_sys._pi.lastChar = (char)c;
+}
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

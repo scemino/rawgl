@@ -59,6 +59,13 @@ static void app_cleanup(void) {
 
 void app_input(const sapp_event* event) {
     switch (event->type) {
+        case SAPP_EVENTTYPE_CHAR: {
+            int c = (int)event->char_code;
+            if ((c > 0x20) && (c < 0x7F)) {
+                game_char_pressed(&state.game, c);
+            }
+        }
+        break;
         case SAPP_EVENTTYPE_KEY_DOWN:
         case SAPP_EVENTTYPE_KEY_UP: {
             game_input_t c;
@@ -68,7 +75,9 @@ void app_input(const sapp_event* event) {
                 case SAPP_KEYCODE_DOWN:         c = GAME_INPUT_DOWN; break;
                 case SAPP_KEYCODE_UP:           c = GAME_INPUT_UP; break;
                 case SAPP_KEYCODE_D:            c = GAME_INPUT_JUMP; break;
-                case SAPP_KEYCODE_S:            c = GAME_INPUT_ACTION; break;
+                case SAPP_KEYCODE_ENTER:        c = GAME_INPUT_ACTION; break;
+                case SAPP_KEYCODE_SPACE:        c = GAME_INPUT_ACTION; break;
+                case SAPP_KEYCODE_ESCAPE:       c = GAME_INPUT_BACK; break;
                 case SAPP_KEYCODE_F:            c = GAME_INPUT_BACK; break;
                 case SAPP_KEYCODE_C:            c = GAME_INPUT_CODE; break;
                 case SAPP_KEYCODE_P:            c = GAME_INPUT_PAUSE; break;
