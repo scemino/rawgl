@@ -11,6 +11,7 @@
 #include "script.h"
 #include "sfxplayer.h"
 #include "systemstub.h"
+#include "sokol_audio.h"
 #include "sokol_sys.h"
 #include "util.h"
 #include "video.h"
@@ -70,6 +71,8 @@ extern "C" {
     #include <assert.h>
     #define GAME_ASSERT(c) assert(c)
 #endif
+
+#define _GAME_DEFAULT(val,def) (((val) != 0) ? (val) : (def))
 
 void game_init(game_t* game, const game_desc_t* desc) {
     GAME_ASSERT(game && desc);
@@ -139,6 +142,7 @@ void game_init(game_t* game, const game_desc_t* desc) {
         mixerType = kMixerTypeAiff;
         break;
     }
+    _state->_mix.callback = desc->audio.callback;
     _state->_mix.init(mixerType);
 
     Video::_useEGA = desc->use_ega;
@@ -203,7 +207,11 @@ void game_exec(game_t* game, uint32_t ms) {
 		_state->_script.setupTasks();
 		_state->_script.updateInput();
 		_state->_script.runTasks();
-		_state->_mix.update();
+        const int num_frames = saudio_expect();
+        if (num_frames > 0) {
+            const int num_samples = num_frames * saudio_channels();
+            _state->_mix.update(num_samples);
+        }
 		if (_state->_res.getDataType() == Resource::DT_3DO) {
 			switch (_state->_res._nextPart) {
 			case 16009:
@@ -216,6 +224,7 @@ void game_exec(game_t* game, uint32_t ms) {
 		}
 		break;
 	}
+    _state->_sys._sleep += 16;
 }
 
 void game_cleanup(game_t* game) {

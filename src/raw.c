@@ -7,6 +7,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include "sokol_app.h"
+#include "sokol_audio.h"
 #include "sokol_gfx.h"
 #include "sokol_glue.h"
 #include "sokol_log.h"
@@ -19,15 +20,29 @@ static struct {
     uint32_t frame_time_us;
 } state;
 
+// audio-streaming callback
+static void push_audio(const float* samples, int num_samples, void* user_data) {
+    (void)user_data;
+    saudio_push(samples, num_samples/2);
+}
+
 static void app_init(void) {
     game_init(&state.game, &(game_desc_t){
-        .part_num = 16001
+        .part_num = 16001,
+        .audio = {
+            .callback = { .func = push_audio },
+            .sample_rate = saudio_sample_rate()
+        }
     });
+    sapp_set_window_title(state.game.title);
     clock_init();
     gfx_init(&(gfx_desc_t){
         .display_info = game_display_info(&state.game),
     });
-    sapp_set_window_title(state.game.title);
+    saudio_setup(&(saudio_desc){
+        .num_channels = 2,
+        .logger.func = slog_func,
+    });
 }
 
 static void app_frame(void) {
@@ -38,6 +53,7 @@ static void app_frame(void) {
 
 static void app_cleanup(void) {
     game_cleanup(&state.game);
+    saudio_shutdown();
     gfx_shutdown();
 }
 

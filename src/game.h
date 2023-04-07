@@ -1,6 +1,12 @@
+#pragma once
+
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#define GAME_DEFAULT_AUDIO_SAMPLE_RATE (44100)
+#define GAME_DEFAULT_AUDIO_SAMPLES (128)     // default number of samples in internal sample buffer
+#define GAME_MAX_AUDIO_SAMPLES (2048*16)      // max number of audio samples in internal sample buffer
 
 typedef enum  {
 	GAME_LANG_FR,
@@ -22,6 +28,18 @@ typedef enum  {
     GAME_INPUT_PAUSE,
 } game_input_t;
 
+typedef struct {
+    void (*func)(const float* samples, int num_samples, void* user_data);
+    void* user_data;
+} game_audio_callback_t;
+
+typedef struct {
+    game_audio_callback_t callback;
+    int num_samples;
+    int sample_rate;
+    float volume;
+} game_audio_desc_t;
+
 // configuration parameters for game_init()
 typedef struct {
     const char *data_dir;       // the directory where the game files are located
@@ -29,6 +47,7 @@ typedef struct {
     bool use_ega;               // true to use EGA palette, false to use VGA palette
     game_lang_t lang;           // language to use
     bool demo3_joy_inputs;      // read the demo3.joy file if present
+    game_audio_desc_t audio;
 } game_desc_t;
 
 typedef struct {

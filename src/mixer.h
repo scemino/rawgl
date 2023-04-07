@@ -8,6 +8,8 @@
 #define MIXER_H__
 
 #include "intern.h"
+#include "gfx.h"
+#include "game.h"
 
 struct AifcPlayer;
 struct SfxPlayer;
@@ -23,11 +25,12 @@ struct Mixer {
 	AifcPlayer *_aifc;
 	SfxPlayer *_sfx;
 	Mixer_impl *_impl;
+    game_audio_callback_t callback;
 
 	Mixer(SfxPlayer *sfx);
 	void init(MixerType mixerType);
 	void quit();
-	void update();
+	void update(int num_samples);
 
 	void playSoundRaw(uint8_t channel, const uint8_t *data, uint16_t freq, uint8_t volume);
 	void playSoundWav(uint8_t channel, const uint8_t *data, uint16_t freq, uint8_t volume, uint8_t loop);
