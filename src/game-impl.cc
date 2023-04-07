@@ -64,9 +64,18 @@ Difficulty Script::_difficulty = DIFFICULTY_NORMAL;
 extern "C" {
 #endif
 
+#ifndef GAME_ASSERT
+    #include <assert.h>
+    #define GAME_ASSERT(c) assert(c)
+#endif
+
 void game_init(game_t* game, const game_desc_t* desc) {
+    GAME_ASSERT(game && desc);
+    memset(game, 0, sizeof(game_t));
+    game->valid = true;
+
     g_debugMask = DBG_INFO | DBG_VIDEO | DBG_SND | DBG_SCRIPT | DBG_BANK | DBG_SER;
-    Language lang = LANG_FR;
+    Language lang = (Language)desc->lang;
     _state = new GameState(desc->data_dir);
     _state->_part_num = desc->part_num;
     _state->_res.detectVersion();
@@ -75,6 +84,7 @@ void game_init(game_t* game, const game_desc_t* desc) {
     _state->_res.allocMemBlock();
 	_state->_res.readEntries();
 	_state->_res.dumpEntries();
+
     const int scalerFactor = 1;
     const bool isNth = !Graphics::_is1991 && (_state->_res.getDataType() == Resource::DT_15TH_EDITION || _state->_res.getDataType() == Resource::DT_20TH_EDITION);
 	int w = GFX_W * scalerFactor;
@@ -92,6 +102,11 @@ void game_init(game_t* game, const game_desc_t* desc) {
 	} else {
 		_state->_vid.setDefaultFont();
 	}
+
+    if (desc->demo3_joy_inputs && _state->_res.getDataType() == Resource::DT_DOS) {
+		_state->_res.readDemo3Joy();
+	}
+
     _state->_sys.setBuffer(game->fb, game->palette);
     _state->_script._stub = &_state->_sys;
 	_state->_script.init();
@@ -121,22 +136,24 @@ void game_init(game_t* game, const game_desc_t* desc) {
         mixerType = kMixerTypeAiff;
         break;
     }
-//  #ifndef BYPASS_PROTECTION
-//  	switch (_state->_res.getDataType()) {
-//  	case Resource::DT_DOS:
-//  		if (!_state->_res._hasPasswordScreen) {
-//  			break;
-//  		}
-//  		/* fall-through */
-//  	case Resource::DT_AMIGA:
-//  	case Resource::DT_ATARI:
-//  	case Resource::DT_WIN31:
-//         _state->_part_num = kPartCopyProtection;
-//  		break;
-//  	default:
-//  		break;
-//  	}
-//  #endif
+    Video::_useEGA = desc->use_ega;
+    // bypass protection ?
+    if(!desc->bypass_protection) {
+        switch (_state->_res.getDataType()) {
+        case Resource::DT_DOS:
+            if (!_state->_res._hasPasswordScreen) {
+                break;
+            }
+            /* fall-through */
+        case Resource::DT_AMIGA:
+        case Resource::DT_ATARI:
+        case Resource::DT_WIN31:
+            _state->_part_num = kPartCopyProtection;
+            break;
+        default:
+            break;
+        }
+    }
 	if (_state->_res.getDataType() == Resource::DT_3DO && _state->_part_num == kPartIntro) {
 		_state->_state = kStateLogo3DO;
 	} else {
@@ -152,6 +169,7 @@ void game_init(game_t* game, const game_desc_t* desc) {
 }
 
 void game_exec(game_t* game) {
+    GAME_ASSERT(game && game->valid);
     (void)game;
 	switch (_state->_state) {
     // TODO: 3DO
@@ -188,11 +206,13 @@ void game_exec(game_t* game) {
 }
 
 void game_cleanup(game_t* game) {
+    GAME_ASSERT(game && game->valid);
     (void)game;
     delete _state;
 }
 
 gfx_display_info_t game_display_info(game_t* game) {
+    GAME_ASSERT(game && game->valid);
     const gfx_display_info_t res = {
         .frame = {
             .dim = {

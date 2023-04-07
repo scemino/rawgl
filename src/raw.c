@@ -22,7 +22,9 @@ static struct {
 
 static void app_init(void) {
     game_init(&state.game, &(game_desc_t){
-        .part_num = 16001
+        .part_num = 16001,
+        .bypass_protection = true,
+        .demo3_joy_inputs = true
     });
     gfx_init(&(gfx_desc_t){
         .display_info = game_display_info(&state.game),
