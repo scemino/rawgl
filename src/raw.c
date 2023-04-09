@@ -29,6 +29,7 @@ static void push_audio(const float* samples, int num_samples, void* user_data) {
 static void app_init(void) {
     game_init(&state.game, &(game_desc_t){
         .part_num = 16001,
+        .demo3_joy_inputs = true,
         .audio = {
             .callback = { .func = push_audio },
             .sample_rate = saudio_sample_rate()

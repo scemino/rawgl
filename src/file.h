@@ -18,6 +18,7 @@ struct File {
 
 	File_impl *_impl;
 
+    void setBuffer(uint8_t* p, size_t size);
 	bool open(const char *filepath);
 	bool open(const char *filename, const char *path);
 	bool openForWriting(const char *filepath);

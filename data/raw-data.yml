@@ -1,0 +1,11 @@
+---
+options:
+    prefix: dump_
+files:
+    - MEMLIST.BIN
+    - BANK0D
+    - BANK01
+    - BANK02
+    - BANK05
+    - BANK06
+    - DEMO3.JOY

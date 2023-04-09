@@ -13,6 +13,7 @@
 #include "unpack.h"
 #include "util.h"
 #include "video.h"
+#include "raw-data.h"
 
 static const char *atariDemo = "aw.tos";
 
@@ -39,10 +40,26 @@ Resource::~Resource() {
 
 bool Resource::readBank(const MemEntry *me, uint8_t *dstBuf) {
 	bool ret = false;
-	char name[10];
-	snprintf(name, sizeof(name), "%s%02x", _bankPrefix, me->bankNum);
+	static uint8_t* banks[] = {
+        dump_BANK01,
+        dump_BANK02,
+        NULL,
+        NULL,
+        dump_BANK05,
+        dump_BANK06,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        dump_BANK0D
+    };
+
 	File f;
-	if (f.open(name, _dataDir) || (_dataType == DT_ATARI_DEMO && f.open(atariDemo, _dataDir))) {
+    // TODO: (_dataType == DT_ATARI_DEMO && f.open(atariDemo, _dataDir))
+	{
+        f.setBuffer(banks[me->bankNum-1], sizeof(banks[me->bankNum-1]));
 		f.seek(me->bankPos);
 		const size_t count = f.read(dstBuf, me->packedSize);
 		ret = (count == me->packedSize);
@@ -98,35 +115,35 @@ static const AmigaMemEntry *detectAmigaAtari(File &f, const char *dataDir) {
 
 void Resource::detectVersion() {
 	File f;
-	if (check15th(f, _dataDir)) {
-		_dataType = DT_15TH_EDITION;
-		debug(DBG_INFO, "Using 15th anniversary edition data files");
-	} else if (check20th(f, _dataDir)) {
-		_dataType = DT_20TH_EDITION;
-		debug(DBG_INFO, "Using 20th anniversary edition data files");
-	} else if (f.open("memlist.bin", _dataDir)) {
-		_dataType = DT_DOS;
-		debug(DBG_INFO, "Using DOS data files");
-	} else if ((_amigaMemList = detectAmigaAtari(f, _dataDir)) != 0) {
-		if (_amigaMemList == _memListAtariEN) {
-			_dataType = DT_ATARI;
-			debug(DBG_INFO, "Using Atari data files");
-		} else {
-			_dataType = DT_AMIGA;
-			debug(DBG_INFO, "Using Amiga data files");
-		}
-	} else if (f.open(ResourceWin31::FILENAME, _dataDir)) {
-		_dataType = DT_WIN31;
-		debug(DBG_INFO, "Using Win31 data files");
-	} else if (check3DO(f, _dataDir)) {
-		_dataType = DT_3DO;
-		debug(DBG_INFO, "Using 3DO data files");
-	} else if (f.open(atariDemo, _dataDir) && f.size() == 96513) {
-		_dataType = DT_ATARI_DEMO;
-		debug(DBG_INFO, "Using Atari demo file");
-	} else {
-		error("No data files found in '%s'", _dataDir);
-	}
+	// if (check15th(f, _dataDir)) {
+	// 	_dataType = DT_15TH_EDITION;
+	// 	debug(DBG_INFO, "Using 15th anniversary edition data files");
+	// } else if (check20th(f, _dataDir)) {
+	// 	_dataType = DT_20TH_EDITION;
+	// 	debug(DBG_INFO, "Using 20th anniversary edition data files");
+	// } else if (f.open("memlist.bin", _dataDir)) {
+	_dataType = DT_DOS;
+	debug(DBG_INFO, "Using DOS data files");
+	// } else if ((_amigaMemList = detectAmigaAtari(f, _dataDir)) != 0) {
+	// 	if (_amigaMemList == _memListAtariEN) {
+	// 		_dataType = DT_ATARI;
+	// 		debug(DBG_INFO, "Using Atari data files");
+	// 	} else {
+	// 		_dataType = DT_AMIGA;
+	// 		debug(DBG_INFO, "Using Amiga data files");
+	// 	}
+	// } else if (f.open(ResourceWin31::FILENAME, _dataDir)) {
+	// 	_dataType = DT_WIN31;
+	// 	debug(DBG_INFO, "Using Win31 data files");
+	// } else if (check3DO(f, _dataDir)) {
+	// 	_dataType = DT_3DO;
+	// 	debug(DBG_INFO, "Using 3DO data files");
+	// } else if (f.open(atariDemo, _dataDir) && f.size() == 96513) {
+	// 	_dataType = DT_ATARI_DEMO;
+	// 	debug(DBG_INFO, "Using Atari demo file");
+	// } else {
+	// 	error("No data files found in '%s'", _dataDir);
+	// }
 }
 
 static const char *kGameTitleEU = "Another World";
@@ -177,11 +194,12 @@ void Resource::readEntries() {
 	case DT_DOS: {
 			_hasPasswordScreen = false; // DOS demo versions do not have the resources
 			File f;
-			if (f.open("demo01", _dataDir)) {
-				_bankPrefix = "demo";
-			}
-			if (f.open("memlist.bin", _dataDir)) {
+			// if (f.open("demo01", _dataDir)) {
+			// 	_bankPrefix = "demo";
+			// }
+            {
 				MemEntry *me = _memList;
+                f.setBuffer(dump_MEMLIST_BIN, sizeof(dump_MEMLIST_BIN));
 				while (1) {
 					assert(_numMemList < ARRAYSIZE(_memList));
 					me->status = f.readByte();
@@ -197,7 +215,7 @@ void Resource::readEntries() {
 						assert(num < _numMemList);
 						char bank[16];
 						snprintf(bank, sizeof(bank), "%s%02x", _bankPrefix, _memList[num].bankNum);
-						_hasPasswordScreen = f.open(bank, _dataDir);
+                        _hasPasswordScreen = false; // dump_BANK09 != NULL;
 						return;
 					}
 					++_numMemList;
@@ -694,7 +712,8 @@ void Resource::freeMemBlock() {
 void Resource::readDemo3Joy() {
 	static const char *filename = "demo3.joy";
 	File f;
-	if (f.open(filename, _dataDir)) {
+	if (dump_DEMO3_JOY) {
+        f.setBuffer(dump_DEMO3_JOY, sizeof(dump_DEMO3_JOY));
 		const uint32_t fileSize = f.size();
 		_demo3Joy.bufPtr = (uint8_t *)malloc(fileSize);
 		if (_demo3Joy.bufPtr) {

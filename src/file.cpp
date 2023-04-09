@@ -21,40 +21,32 @@ struct File_impl {
 	virtual void seek(int off, int whence) = 0;
 	virtual int read(void *ptr, uint32_t len) = 0;
 	virtual int write(void *ptr, uint32_t len) = 0;
+
+    uint8_t* p;
+    uint8_t* p_max;
 };
 
 struct stdFile : File_impl {
-	FILE *_fp;
-	stdFile() : _fp(0) {}
+	stdFile() {}
 	bool open(const char *path, const char *mode) {
 		_ioErr = false;
-		_fp = fopen(path, mode);
-		return (_fp != 0);
+		return (p != 0);
 	}
 	void close() {
-		if (_fp) {
-			fclose(_fp);
-			_fp = 0;
-		}
 	}
 	uint32_t size() {
-		uint32_t sz = 0;
-		if (_fp) {
-			int pos = ftell(_fp);
-			fseek(_fp, 0, SEEK_END);
-			sz = ftell(_fp);
-			fseek(_fp, pos, SEEK_SET);
-		}
-		return sz;
+		return p_max - p;
 	}
 	void seek(int off, int whence) {
-		if (_fp) {
-			fseek(_fp, off, whence);
+		if (p) {
+			p += off;
 		}
 	}
 	int read(void *ptr, uint32_t len) {
-		if (_fp) {
-			uint32_t r = fread(ptr, 1, len, _fp);
+		if (p) {
+            memcpy(ptr, p, len);
+			p += len;
+            int r = len;
 			if (r != len) {
 				_ioErr = true;
 			}
@@ -63,13 +55,6 @@ struct stdFile : File_impl {
 		return 0;
 	}
 	int write(void *ptr, uint32_t len) {
-		if (_fp) {
-			uint32_t r = fwrite(ptr, 1, len, _fp);
-			if (r != len) {
-				_ioErr = true;
-			}
-			return r;
-		}
 		return 0;
 	}
 };
@@ -198,6 +183,11 @@ void File::writeUint16BE(uint16_t n) {
 void File::writeUint32BE(uint32_t n) {
 	writeUint16BE(n >> 16);
 	writeUint16BE(n & 0xFFFF);
+}
+
+void File::setBuffer(uint8_t* p, size_t size) {
+    _impl->p = p;
+    _impl->p_max = _impl->p + size;
 }
 
 void dumpFile(const char *filename, const uint8_t *p, int size) {
