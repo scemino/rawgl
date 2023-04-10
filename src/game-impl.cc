@@ -88,26 +88,21 @@ void game_init(game_t* game, const game_desc_t* desc) {
     _state->_res._lang = lang;
     _state->_res.allocMemBlock();
 	_state->_res.readEntries();
-	_state->_res.dumpEntries();
 
-    const int scalerFactor = 1;
-    const bool isNth = !Graphics::_is1991 && (_state->_res.getDataType() == Resource::DT_15TH_EDITION || _state->_res.getDataType() == Resource::DT_20TH_EDITION);
-	int w = GFX_W * scalerFactor;
-	int h = GFX_H * scalerFactor;
-	if (isNth) {
-		// get HD background bitmaps resolution
-		_state->_res._nth->getBitmapSize(&w, &h);
-	}
 	debug(DBG_INFO, "Using sokol graphics");
     _state->_vid._graphics = &_state->_graphics;
     _state->_graphics.setSystem(&_state->_sys);
-    _state->_graphics.init(w, h);
-	if (isNth) {
-		_state->_res.loadFont();
-		_state->_res.loadHeads();
-	} else {
-		_state->_vid.setDefaultFont();
-	}
+    gfx_fb fbs = {
+        .buffer = {
+            game->fbs[0].buffer,
+            game->fbs[1].buffer,
+            game->fbs[2].buffer,
+            game->fbs[3].buffer
+        }
+    };
+    _state->_graphics.setBuffers(&fbs);
+    _state->_graphics.init(GFX_W, GFX_H);
+	_state->_vid.setDefaultFont();
 
     if (desc->demo3_joy_inputs && _state->_res.getDataType() == Resource::DT_DOS) {
 		_state->_res.readDemo3Joy();
@@ -180,6 +175,7 @@ void game_init(game_t* game, const game_desc_t* desc) {
 void game_exec(game_t* game, uint32_t ms) {
     GAME_ASSERT(game && game->valid);
     (void)game;
+
     _state->_sys._elapsed += ms;
     if(_state->_sys._sleep) {
         if(ms > _state->_sys._sleep) {
@@ -189,41 +185,26 @@ void game_exec(game_t* game, uint32_t ms) {
         }
         return;
     }
-	switch (_state->_state) {
-    // TODO: 3DO
-	// case kStateLogo3DO:
-	// 	doThreeScreens();
-	// 	scrollText(0, 380, Video::_noteText3DO);
-	// 	playCinepak("Logo.Cine");
-	// 	playCinepak("Spintitle.Cine");
-	// 	break;
-	// case kStateTitle3DO:
-	// 	titlePage();
-	// 	break;
-	// case kStateEnd3DO:
-	// 	doEndCredits();
-	// 	break;
-	case kStateGame:
-		_state->_script.setupTasks();
-		_state->_script.updateInput();
-		_state->_script.runTasks();
-        const int num_frames = saudio_expect();
-        if (num_frames > 0) {
-            const int num_samples = num_frames * saudio_channels();
-            _state->_mix.update(num_samples);
+
+    _state->_script.setupTasks();
+    _state->_script.updateInput();
+    _state->_script.runTasks();
+    const int num_frames = saudio_expect();
+    if (num_frames > 0) {
+        const int num_samples = num_frames * saudio_channels();
+        _state->_mix.update(num_samples);
+    }
+    if (_state->_res.getDataType() == Resource::DT_3DO) {
+        switch (_state->_res._nextPart) {
+        case 16009:
+            _state->_state = kStateEnd3DO;
+            break;
+        case 16000:
+            _state->_state = kStateTitle3DO;
+            break;
         }
-		if (_state->_res.getDataType() == Resource::DT_3DO) {
-			switch (_state->_res._nextPart) {
-			case 16009:
-				_state->_state = kStateEnd3DO;
-				break;
-			case 16000:
-				_state->_state = kStateTitle3DO;
-				break;
-			}
-		}
-		break;
-	}
+    }
+
     _state->_sys._sleep += 16;
 }
 
@@ -297,6 +278,14 @@ void game_key_up(game_t* game, game_input_t input) {
 
 void game_char_pressed(game_t* game, int c) {
     _state->_sys._pi.lastChar = (char)c;
+}
+
+void game_get_resources(game_t* game, game_resource_t* res) {
+    memcpy(res->mem_entries, _state->_res._memList, sizeof(_state->_res._memList));
+}
+
+void game_get_vars(game_t* game, int16_t** vars) {
+    *vars = &_state->_script._scriptVars[0];
 }
 
 #ifdef __cplusplus

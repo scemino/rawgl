@@ -14,17 +14,35 @@
 #include "clock.h"
 #include "gfx.h"
 #include "game.h"
+#if defined(GAME_USE_UI)
+    #define UI_DBG_USE_Z80
+    #include "ui.h"
+    #include "ui/ui_game.h"
+#endif
 
 static struct {
     game_t game;
     uint32_t frame_time_us;
+    #ifdef GAME_USE_UI
+        ui_game_t ui;
+    #endif
 } state;
+
+#ifdef GAME_USE_UI
+static void ui_draw_cb(void);
+#endif
 
 // audio-streaming callback
 static void push_audio(const float* samples, int num_samples, void* user_data) {
     (void)user_data;
     saudio_push(samples, num_samples/2);
 }
+
+#if defined(GAME_USE_UI)
+static void ui_draw_cb(void) {
+    ui_game_draw(&state.ui);
+}
+#endif
 
 static void app_init(void) {
     game_init(&state.game, &(game_desc_t){
@@ -39,11 +57,25 @@ static void app_init(void) {
     clock_init();
     gfx_init(&(gfx_desc_t){
         .display_info = game_display_info(&state.game),
+        #ifdef GAME_USE_UI
+            .draw_extra_cb = ui_draw,
+        #endif
     });
     saudio_setup(&(saudio_desc){
         .num_channels = 2,
         .logger.func = slog_func,
     });
+    #ifdef GAME_USE_UI
+        ui_init(ui_draw_cb);
+        ui_game_init(&state.ui, &(ui_game_desc_t){
+            .game = &state.game,
+            .dbg_texture = {
+                .create_cb = gfx_create_texture,
+                .update_cb = gfx_update_texture,
+                .destroy_cb = gfx_destroy_texture,
+            },
+        });
+    #endif
 }
 
 static void app_frame(void) {
@@ -54,11 +86,21 @@ static void app_frame(void) {
 
 static void app_cleanup(void) {
     game_cleanup(&state.game);
+    #ifdef GAME_USE_UI
+        ui_game_discard(&state.ui);
+        ui_discard();
+    #endif
     saudio_shutdown();
     gfx_shutdown();
 }
 
 void app_input(const sapp_event* event) {
+#ifdef GAME_USE_UI
+    if (ui_input(event)) {
+        // input was handled by UI
+        return;
+    }
+#endif
     switch (event->type) {
         case SAPP_EVENTTYPE_CHAR: {
             int c = (int)event->char_code;

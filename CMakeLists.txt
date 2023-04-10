@@ -12,6 +12,7 @@ include_directories(src)
 include_directories(libs/gfx)
 include_directories(libs/sokol)
 fips_setup()
+fips_import_fips_imgui_imgui()
 
 #  platform selection
 add_definitions(-DSOKOL_NO_DEPRECATED)

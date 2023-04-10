@@ -18,7 +18,6 @@ GraphicsSokol::GraphicsSokol() {
 
 GraphicsSokol::~GraphicsSokol() {
 	for (int i = 0; i < 4; ++i) {
-		free(_pagePtrs[i]);
 		_pagePtrs[i] = 0;
 	}
 	free(_colorBuffer);
@@ -36,10 +35,6 @@ void GraphicsSokol::setSize(int w, int h) {
 		error("Unable to allocate color buffer w %d h %d", _w, _h);
 	}
 	for (int i = 0; i < 4; ++i) {
-		_pagePtrs[i] = (uint8_t *)realloc(_pagePtrs[i], getPageSize());
-		if (!_pagePtrs[i]) {
-			error("Not enough memory to allocate offscreen buffers");
-		}
 		memset(_pagePtrs[i], 0, getPageSize());
 	}
 	setWorkPagePtr(2);
@@ -446,4 +441,10 @@ void GraphicsSokol::drawBitmapOverlay(const uint8_t *data, int w, int h, int fmt
 		stub->setScreenPixels555((const uint16_t *)data, w, h);
 		stub->updateScreen();
 	}
+}
+
+void GraphicsSokol::setBuffers(gfx_fb* fb) {
+    for(int i=0; i<4; i++) {
+        _pagePtrs[i] = fb->buffer[i];
+    }
 }

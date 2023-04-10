@@ -3,6 +3,18 @@
 
 struct SokolSystem;
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef struct  {
+    uint8_t* buffer[4];
+} gfx_fb;
+
+#ifdef __cplusplus
+} /* extern "C" */
+#endif
+
 struct GraphicsSokol: Graphics {
 	typedef void (GraphicsSokol::*drawLine)(int16_t x1, int16_t x2, int16_t y, uint8_t col);
 
@@ -23,6 +35,7 @@ struct GraphicsSokol: Graphics {
 	int xScale(int x) const { return (x * _u) >> 16; }
 	int yScale(int y) const { return (y * _v) >> 16; }
 
+    void setBuffers(gfx_fb* fb);
 	void setSize(int w, int h);
 	void drawPolygon(uint8_t color, const QuadStrip &qs);
 	void drawChar(uint8_t c, uint16_t x, uint16_t y, uint8_t color);

@@ -45,6 +45,7 @@ typedef struct {
 typedef struct {
     gfx_display_info_t display_info;
     gfx_dim_t pixel_aspect;   // optional pixel aspect ratio, default is 1:1
+    void (*draw_extra_cb)(void);
 } gfx_desc_t;
 
 void gfx_init(const gfx_desc_t* desc);

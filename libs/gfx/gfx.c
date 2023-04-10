@@ -44,6 +44,7 @@ typedef struct {
         sg_image images[GFX_DELETE_STACK_SIZE];
         size_t cur_slot;
     } delete_stack;
+    void (*draw_extra_cb)(void);
 } gfx_state_t;
 static gfx_state_t state;
 
@@ -129,6 +130,7 @@ void gfx_init(const gfx_desc_t* desc) {
 
     state.valid = true;
     state.display.portrait = desc->display_info.portrait;
+    state.draw_extra_cb = desc->draw_extra_cb;
     state.fb.dim = desc->display_info.frame.dim;
     state.offscreen.pixel_aspect.width = GFX_DEF(desc->pixel_aspect.width, 1);
     state.offscreen.pixel_aspect.height = GFX_DEF(desc->pixel_aspect.height, 1);
@@ -289,6 +291,9 @@ void gfx_draw(gfx_display_info_t display_info) {
     sg_draw(0, 4, 1);
     sg_apply_viewport(0, 0, display.width, display.height, true);
     sgl_draw();
+    if (state.draw_extra_cb) {
+        state.draw_extra_cb();
+    }
     sg_end_pass();
     sg_commit();
 
