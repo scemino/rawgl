@@ -6,15 +6,15 @@
 
     Do this:
     ~~~C
-    #define CHIPS_UI_IMPL
+    #define GAME_UI_IMPL
     ~~~
-    before you include this file in *one* C++ file to create the 
+    before you include this file in *one* C++ file to create the
     implementation.
 
     Optionally provide the following macros with your own implementation
-    
+
     ~~~C
-    CHIPS_ASSERT(c)
+    GAME_ASSERT(c)
     ~~~
         your own assert macro (default: assert(c))
 
@@ -39,7 +39,7 @@
         2. Altered source versions must be plainly marked as such, and must not
         be misrepresented as being the original software.
         3. This notice may not be removed or altered from any source
-        distribution. 
+        distribution.
 #*/
 #include <stdint.h>
 #include <stdbool.h>
@@ -72,7 +72,7 @@ void ui_util_options_menu(void);
 #endif
 
 /*-- IMPLEMENTATION (include in C++ source) ----------------------------------*/
-#ifdef CHIPS_UI_IMPL
+#ifdef GAME_UI_IMPL
 #ifndef __cplusplus
 #error "implementation must be compiled as C++"
 #endif
@@ -82,9 +82,9 @@ void ui_util_options_menu(void);
 #endif
 #include <string.h> /* memset */
 #include <stdio.h>  /* sscanf */
-#ifndef CHIPS_ASSERT
+#ifndef GAME_ASSERT
     #include <assert.h>
-    #define CHIPS_ASSERT(c) assert(c)
+    #define GAME_ASSERT(c) assert(c)
 #endif
 
 uint16_t ui_util_input_u16(const char* label, uint16_t val) {
@@ -163,7 +163,7 @@ void ui_util_b32(const char* label, uint32_t val) {
 }
 
 uint32_t ui_util_color(int imgui_color) {
-    CHIPS_ASSERT((imgui_color >= 0) && (imgui_color < ImGuiCol_COUNT));
+    GAME_ASSERT((imgui_color >= 0) && (imgui_color < ImGuiCol_COUNT));
     const ImGuiStyle& style = ImGui::GetStyle();
     ImVec4 c = style.Colors[imgui_color];
     c.w *= style.Alpha;
@@ -192,4 +192,4 @@ void ui_util_options_menu(void) {
 #ifdef _MSC_VER
 #pragma warning(pop)
 #endif
-#endif /* CHIPS_UI_IMPL */
+#endif /* GAME_UI_IMPL */

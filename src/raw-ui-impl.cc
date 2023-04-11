@@ -5,11 +5,14 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include "gfx.h"
+#include "common.h"
 #include "game.h"
 #include "script.h"
 #define GAME_UI_IMPL
 #include "imgui.h"
-#define CHIPS_UI_IMPL
 #include "resource.h"
 #include "ui/ui_util.h"
+#include "ui/raw-dasm.h"
+#include "ui/ui_dbg.h"
+#include "ui/ui_dasm.h"
 #include "ui/ui_game.h"

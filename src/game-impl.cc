@@ -2,6 +2,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include "gfx.h"
+#include "common.h"
 #include "game.h"
 #include "graphics.h"
 #include "graphics_sokol.h"
@@ -76,8 +77,10 @@ extern "C" {
 
 void game_init(game_t* game, const game_desc_t* desc) {
     GAME_ASSERT(game && desc);
+    if (desc->debug.callback.func) { GAME_ASSERT(desc->debug.stopped); }
     memset(game, 0, sizeof(game_t));
     game->valid = true;
+    game->debug = desc->debug;
 
     g_debugMask = DBG_INFO | DBG_VIDEO | DBG_SND | DBG_SCRIPT | DBG_BANK | DBG_SER;
     Language lang = (Language)desc->lang;
@@ -172,10 +175,7 @@ void game_init(game_t* game, const game_desc_t* desc) {
     game->title = _state->_res.getGameTitle(lang);
 }
 
-void game_exec(game_t* game, uint32_t ms) {
-    GAME_ASSERT(game && game->valid);
-    (void)game;
-
+void _game_exec(game_t* game, uint32_t ms) {
     _state->_sys._elapsed += ms;
     if(_state->_sys._sleep) {
         if(ms > _state->_sys._sleep) {
@@ -206,6 +206,22 @@ void game_exec(game_t* game, uint32_t ms) {
     }
 
     _state->_sys._sleep += 16;
+}
+
+void game_exec(game_t* game, uint32_t ms) {
+    GAME_ASSERT(game && game->valid);
+    (void)game;
+
+    if (0 == game->debug.callback.func) {
+        // run without debug hook
+        _game_exec(game, ms);
+    } else {
+        // run with debug hook
+        if(!(*game->debug.stopped)) {
+            _game_exec(game, ms);
+            game->debug.callback.func(game->debug.callback.user_data, _state->_script._scriptPtr.pc - _state->_res._segCode);
+        }
+    }
 }
 
 void game_cleanup(game_t* game) {
@@ -280,12 +296,17 @@ void game_char_pressed(game_t* game, int c) {
     _state->_sys._pi.lastChar = (char)c;
 }
 
-void game_get_resources(game_t* game, game_resource_t* res) {
-    memcpy(res->mem_entries, _state->_res._memList, sizeof(_state->_res._memList));
+void game_get_resources(game_t* game, game_mem_entry_t** res) {
+    //memcpy(res->mem_entries, _state->_res._memList, sizeof(_state->_res._memList));
+    *res = (game_mem_entry_t*)&_state->_res._memList[0];
 }
 
 void game_get_vars(game_t* game, int16_t** vars) {
     *vars = &_state->_script._scriptVars[0];
+}
+
+uint8_t* game_get_pc(game_t* game) {
+    return _state->_res._segCode;
 }
 
 #ifdef __cplusplus

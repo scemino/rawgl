@@ -49,6 +49,7 @@ typedef struct {
     game_lang_t lang;           // language to use
     bool demo3_joy_inputs;      // read the demo3.joy file if present
     game_audio_desc_t audio;
+    game_debug_t debug;
 } game_desc_t;
 
 typedef struct {
@@ -67,11 +68,8 @@ typedef struct {
 } game_mem_entry_t;
 
 typedef struct {
-    game_mem_entry_t mem_entries[GAME_ENTRIES_COUNT_20TH];
-} game_resource_t;
-
-typedef struct {
     bool valid;
+    game_debug_t debug;
 
     uint8_t fb[320*200];          // frame buffer: this where is stored the image with indexed color
     game_framebuffer_t fbs[4];    // frame buffer: this where is stored the image with indexed color
@@ -87,7 +85,8 @@ void game_cleanup(game_t* game);
 void game_key_down(game_t* game, game_input_t input);
 void game_key_up(game_t* game, game_input_t input);
 void game_char_pressed(game_t* game, int c);
-void game_get_resources(game_t* game, game_resource_t* res);
+void game_get_resources(game_t* game, game_mem_entry_t** res);
+uint8_t* game_get_pc(game_t* game);
 void game_get_vars(game_t* game, int16_t** vars);
 
 #ifdef __cplusplus

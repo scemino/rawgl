@@ -9,6 +9,7 @@
 
 #include "intern.h"
 #include "gfx.h"
+#include "common.h"
 #include "game.h"
 
 struct AifcPlayer;

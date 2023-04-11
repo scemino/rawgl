@@ -18,11 +18,6 @@
     ~~~
         your own assert macro (default: assert(c))
 
-    Include the following headers (and their depenencies) before including
-    ui_1013.h both for the declaration and implementation.
-
-    - game.h
-
     ## zlib/libpng license
 
     Copyright (c) 2023 Scemino
@@ -48,19 +43,6 @@
 extern "C" {
 #endif
 
-/* a callback to create a dynamic-update RGBA8 UI texture, needs to return an ImTextureID handle */
-typedef void* (*ui_dbg_create_texture_t)(int w, int h);
-/* callback to update a UI texture with new data */
-typedef void (*ui_dbg_update_texture_t)(void* tex_handle, void* data, int data_byte_size);
-/* callback to destroy a UI texture */
-typedef void (*ui_dbg_destroy_texture_t)(void* tex_handle);
-
-typedef struct ui_dbg_texture_callbacks_t {
-    ui_dbg_create_texture_t create_cb;      // callback to create UI texture
-    ui_dbg_update_texture_t update_cb;      // callback to update UI texture
-    ui_dbg_destroy_texture_t destroy_cb;    // callback to destroy UI texture
-} ui_dbg_texture_callbacks_t;
-
 typedef struct {
     int x, y;
     int w, h;
@@ -74,7 +56,7 @@ typedef struct {
     int x, y;
     int w, h;
     bool open;
-    game_resource_t res;
+    game_mem_entry_t* res;
 } ui_game_res_t;
 
 typedef struct {
@@ -94,11 +76,14 @@ typedef struct {
     ui_game_video_t video;
     ui_game_res_t res;
     ui_game_script_t script;
+    ui_dasm_t dasm[4];
+    ui_dbg_t dbg;
 } ui_game_t;
 
 void ui_game_init(ui_game_t* ui, const ui_game_desc_t* desc);
 void ui_game_discard(ui_game_t* ui);
 void ui_game_draw(ui_game_t* ui);
+game_debug_t ui_game_get_debug(ui_game_t* ui);
 
 #ifdef __cplusplus
 } /* extern "C" */
@@ -129,6 +114,20 @@ static void _ui_game_draw_menu(ui_game_t* ui) {
             ImGui::MenuItem("Video Hardware", 0, &ui->video.open);
             ImGui::MenuItem("Resource", 0, &ui->res.open);
             ImGui::MenuItem("Script", 0, &ui->script.open);
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("Debug")) {
+            ImGui::MenuItem("CPU Debugger", 0, &ui->dbg.ui.open);
+            ImGui::MenuItem("Breakpoints", 0, &ui->dbg.ui.show_breakpoints);
+            ImGui::MenuItem("Execution History", 0, &ui->dbg.ui.show_history);
+            ImGui::MenuItem("Memory Heatmap", 0, &ui->dbg.ui.show_heatmap);
+            if (ImGui::BeginMenu("Disassembler")) {
+                ImGui::MenuItem("Window #1", 0, &ui->dasm[0].open);
+                ImGui::MenuItem("Window #2", 0, &ui->dasm[1].open);
+                ImGui::MenuItem("Window #3", 0, &ui->dasm[2].open);
+                ImGui::MenuItem("Window #4", 0, &ui->dasm[3].open);
+                ImGui::EndMenu();
+            }
             ImGui::EndMenu();
         }
         ui_util_options_menu();
@@ -224,7 +223,7 @@ static void _ui_game_draw_resources(ui_game_t* ui) {
             for(int i=0; i<GAME_ENTRIES_COUNT_20TH; i++) {
                 ImGui::TableNextRow();
                 ImGui::TableNextColumn();
-                game_mem_entry_t* e = &ui->res.res.mem_entries[i];
+                game_mem_entry_t* e = &ui->res.res[i];
                 if(e->status == 0xFF) break;
                 Resource::ResType t = (Resource::ResType)e->type;
                 switch(t) {
@@ -287,10 +286,30 @@ static void _ui_game_draw_video(ui_game_t* ui) {
     ImGui::End();
 }
 
+static uint8_t _ui_raw_mem_read(int layer, uint16_t addr, void* user_data) {
+    GAME_ASSERT(user_data);
+    (void)layer;
+    ui_game_t* ui = (ui_game_t*) user_data;
+    uint8_t* pc = game_get_pc(ui->game);
+    return pc[addr];
+}
+
 void ui_game_init(ui_game_t* ui, const ui_game_desc_t* ui_desc) {
     GAME_ASSERT(ui && ui_desc);
     GAME_ASSERT(ui_desc->game);
     ui->game = ui_desc->game;
+     {
+        ui_dbg_desc_t desc = {0};
+        desc.title = "CPU Debugger";
+        desc.x = 10;
+        desc.y = 20;
+        desc.game = ui->game;
+        desc.read_cb = _ui_raw_mem_read;
+        desc.texture_cbs = ui_desc->dbg_texture;
+        //desc.keys = ui_desc->dbg_keys;
+        desc.user_data = ui->game;
+        ui_dbg_init(&ui->dbg, &desc);
+    }
     {
         ui->video.texture_cbs = ui_desc->dbg_texture;
         ui->video.x = 10;
@@ -315,6 +334,20 @@ void ui_game_init(ui_game_t* ui, const ui_game_desc_t* ui_desc) {
         ui->script.h = 568;
         game_get_vars(ui->game, &ui->script.vars);
     }
+    {
+        ui_dasm_desc_t desc = {0};
+        desc.layers[0] = "System";
+        desc.start_addr = 0;
+        desc.read_cb = _ui_raw_mem_read;
+        desc.user_data = ui;
+        static const char* titles[4] = { "Disassembler #1", "Disassembler #2", "Disassembler #2", "Dissassembler #3" };
+        int x = 20, y = 20, dx = 10, dy = 10;
+        for (int i = 0; i < 4; i++) {
+            desc.title = titles[i]; desc.x = x; desc.y = y;
+            ui_dasm_init(&ui->dasm[i], &desc);
+            x += dx; y += dy;
+        }
+    }
 }
 
 void ui_game_discard(ui_game_t* ui) {
@@ -322,6 +355,10 @@ void ui_game_discard(ui_game_t* ui) {
     for(int i=0; i<4; i++) {
         ui->video.texture_cbs.destroy_cb(ui->video.tex_fb[i]);
     }
+    for (int i = 0; i < 4; i++) {
+        ui_dasm_discard(&ui->dasm[i]);
+    }
+    ui_dbg_discard(&ui->dbg);
     ui->game = 0;
 }
 
@@ -331,6 +368,19 @@ void ui_game_draw(ui_game_t* ui) {
     _ui_game_draw_resources(ui);
     _ui_game_draw_video(ui);
     _ui_game_draw_script(ui);
+    for (int i = 0; i < 4; i++) {
+        ui_dasm_draw(&ui->dasm[i]);
+    }
+    ui_dbg_draw(&ui->dbg);
+}
+
+game_debug_t ui_game_get_debug(ui_game_t* ui) {
+    GAME_ASSERT(ui);
+    game_debug_t res = {};
+    res.callback.func = (game_debug_func_t)ui_dbg_tick;
+    res.callback.user_data = &ui->dbg;
+    res.stopped = &ui->dbg.dbg.stopped;
+    return res;
 }
 
 #ifdef __clang__

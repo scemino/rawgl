@@ -13,10 +13,13 @@
 #include "sokol_log.h"
 #include "clock.h"
 #include "gfx.h"
+#include "common.h"
 #include "game.h"
 #if defined(GAME_USE_UI)
-    #define UI_DBG_USE_Z80
     #include "ui.h"
+    #include "ui/raw-dasm.h"
+    #include "ui/ui_dasm.h"
+    #include "ui/ui_dbg.h"
     #include "ui/ui_game.h"
 #endif
 
@@ -51,7 +54,10 @@ static void app_init(void) {
         .audio = {
             .callback = { .func = push_audio },
             .sample_rate = saudio_sample_rate()
-        }
+        },
+         #if defined(GAME_USE_UI)
+            .debug = ui_game_get_debug(&state.ui)
+        #endif
     });
     sapp_set_window_title(state.game.title);
     clock_init();
