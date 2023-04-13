@@ -9,6 +9,19 @@ extern "C" {
 #define GAME_MAX_AUDIO_SAMPLES (2048*16)        // max number of audio samples in internal sample buffer
 #define GAME_ENTRIES_COUNT_20TH (178)
 
+#define VAR_RANDOM_SEED          (0x3C)
+#define VAR_SCREEN_NUM           (0x67)
+#define VAR_LAST_KEYCHAR         (0xDA)
+#define VAR_HERO_POS_UP_DOWN     (0xE5)
+#define VAR_MUSIC_SYNC           (0xF4)
+#define VAR_SCROLL_Y             (0xF9)
+#define VAR_HERO_ACTION          (0xFA)
+#define VAR_HERO_POS_JUMP_DOWN   (0xFB)
+#define VAR_HERO_POS_LEFT_RIGHT  (0xFC)
+#define VAR_HERO_POS_MASK        (0xFD)
+#define VAR_HERO_ACTION_POS_MASK (0xFE)
+#define VAR_PAUSE_SLICES         (0xFF)
+
 typedef enum  {
 	GAME_LANG_FR,
 	GAME_LANG_US,
@@ -67,15 +80,35 @@ typedef struct {
 	uint32_t unpackedSize; // 0x12
 } game_mem_entry_t;
 
+// TODO: rename this
+typedef struct {
+	uint8_t *pc;
+} game_pc_t;
+
 typedef struct {
     bool valid;
     game_debug_t debug;
 
-    uint8_t fb[320*200];          // frame buffer: this where is stored the image with indexed color
-    game_framebuffer_t fbs[4];    // frame buffer: this where is stored the image with indexed color
-    uint32_t palette[16];         // palette containing 16 RGBA colors
+    struct {
+        uint8_t             fb[320*200];    // frame buffer: this where is stored the image with indexed color
+        game_framebuffer_t  fbs[4];         // frame buffer: this where is stored the image with indexed color
+        uint32_t            palette[16];    // palette containing 16 RGBA colors
+    } gfx;
 
-    const char* title;            // title of the game
+    struct {
+        int16_t     vars[256];
+        uint16_t    stack_calls[64];
+        uint16_t    tasks[2][64];
+        uint8_t     states[2][64];
+        game_pc_t   ptr;
+        uint8_t     stack_ptr;
+        bool        paused;
+        bool        fast_mode;
+        int         screen_num;
+        uint32_t    start_time, time_stamp;
+    } vm;
+
+    const char* title;      // title of the game
 } game_t;
 
 gfx_display_info_t game_display_info(game_t* game);
@@ -87,7 +120,6 @@ void game_key_up(game_t* game, game_input_t input);
 void game_char_pressed(game_t* game, int c);
 void game_get_resources(game_t* game, game_mem_entry_t** res);
 uint8_t* game_get_pc(game_t* game);
-void game_get_vars(game_t* game, int16_t** vars);
 bool game_get_res_buf(int id, uint8_t* dst);
 
 #ifdef __cplusplus

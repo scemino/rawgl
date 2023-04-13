@@ -5,54 +5,8 @@
  */
 
 #include "graphics.h"
-#include "script.h"
 #include "resource.h"
 #include "video.h"
-
-
-const Script::OpcodeStub Script::_opTable[] = {
-	/* 0x00 */
-	&Script::op_movConst,
-	&Script::op_mov,
-	&Script::op_add,
-	&Script::op_addConst,
-	/* 0x04 */
-	&Script::op_call,
-	&Script::op_ret,
-	&Script::op_yieldTask,
-	&Script::op_jmp,
-	/* 0x08 */
-	&Script::op_installTask,
-	&Script::op_jmpIfVar,
-	&Script::op_condJmp,
-	&Script::op_setPalette,
-	/* 0x0C */
-	&Script::op_changeTasksState,
-	&Script::op_selectPage,
-	&Script::op_fillPage,
-	&Script::op_copyPage,
-	/* 0x10 */
-	&Script::op_updateDisplay,
-	&Script::op_removeTask,
-	&Script::op_drawString,
-	&Script::op_sub,
-	/* 0x14 */
-	&Script::op_and,
-	&Script::op_or,
-	&Script::op_shl,
-	&Script::op_shr,
-	/* 0x18 */
-	&Script::op_playSound,
-	&Script::op_updateResources,
-	&Script::op_playMusic
-};
-
-const uint16_t Script::_periodTable[] = {
-	1076, 1016,  960,  906,  856,  808,  762,  720,  678,  640,
-	 604,  570,  538,  508,  480,  453,  428,  404,  381,  360,
-	 339,  320,  302,  285,  269,  254,  240,  226,  214,  202,
-	 190,  180,  170,  160,  151,  143,  135,  127,  120,  113
-};
 
 const uint8_t Graphics::_font[] = {
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x10, 0x10, 0x10, 0x10, 0x00, 0x10, 0x00,

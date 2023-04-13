@@ -66,8 +66,7 @@ typedef struct {
     int x, y;
     int w, h;
     bool open;
-    int16_t* vars;
-} ui_game_script_t;
+} ui_game_vm_t;
 
 typedef struct {
     game_t* game;
@@ -78,7 +77,7 @@ typedef struct {
     game_t* game;
     ui_game_video_t video;
     ui_game_res_t res;
-    ui_game_script_t script;
+    ui_game_vm_t vm;
     ui_dasm_t dasm[4];
     ui_dbg_t dbg;
 } ui_game_t;
@@ -116,7 +115,7 @@ static void _ui_game_draw_menu(ui_game_t* ui) {
         if (ImGui::BeginMenu("Info")) {
             ImGui::MenuItem("Video Hardware", 0, &ui->video.open);
             ImGui::MenuItem("Resource", 0, &ui->res.open);
-            ImGui::MenuItem("Script", 0, &ui->script.open);
+            ImGui::MenuItem("Virtual machine", 0, &ui->vm.open);
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Debug")) {
@@ -141,65 +140,65 @@ static void _ui_game_draw_menu(ui_game_t* ui) {
 static void _ui_game_update_fbs(ui_game_t* ui) {
     for(int i=0; i<4; i++) {
         for(int j=0; j<320*200; j++) {
-            ui->video.pixel_buffer[j] = ui->game->palette[ui->game->fbs[i].buffer[j]];
+            ui->video.pixel_buffer[j] = ui->game->gfx.palette[ui->game->gfx.fbs[i].buffer[j]];
         }
         ui->video.texture_cbs.update_cb(ui->video.tex_fb[i], ui->video.pixel_buffer, 320*200*sizeof(uint32_t));
     }
 }
 
-static void _ui_game_draw_script(ui_game_t* ui) {
-     if (!ui->script.open) {
+static void _ui_game_draw_vm(ui_game_t* ui) {
+     if (!ui->vm.open) {
         return;
     }
-    ImGui::SetNextWindowPos(ImVec2((float)ui->script.x, (float)ui->script.y), ImGuiCond_Once);
-    ImGui::SetNextWindowSize(ImVec2((float)ui->script.w, (float)ui->script.h), ImGuiCond_Once);
-    if (ImGui::Begin("Script", &ui->script.open)) {
+    ImGui::SetNextWindowPos(ImVec2((float)ui->vm.x, (float)ui->vm.y), ImGuiCond_Once);
+    ImGui::SetNextWindowSize(ImVec2((float)ui->vm.w, (float)ui->vm.h), ImGuiCond_Once);
+    if (ImGui::Begin("Variables", &ui->vm.open)) {
         for(int i=0; i<256; i++) {
             const char* s = NULL;
             char tmp[16];
             switch(i) {
-                case Script::VAR_RANDOM_SEED:
+                case VAR_RANDOM_SEED:
                 s = "RANDOM_SEED";
                 break;
-                case Script::VAR_SCREEN_NUM:
+                case VAR_SCREEN_NUM:
                 s = "SCREEN_NUM";
                 break;
-                case Script::VAR_LAST_KEYCHAR:
+                case VAR_LAST_KEYCHAR:
                 s = "LAST_KEYCHAR";
                 break;
-                case Script::VAR_HERO_POS_UP_DOWN:
+                case VAR_HERO_POS_UP_DOWN:
                 s = "HERO_POS_UP_DOWN";
                 break;
-                case Script::VAR_MUSIC_SYNC:
+                case VAR_MUSIC_SYNC:
                 s = "MUSIC_SYNC";
                 break;
-                case Script::VAR_SCROLL_Y:
+                case VAR_SCROLL_Y:
                 s = "SCROLL_Y";
                 break;
-                case Script::VAR_HERO_ACTION:
+                case VAR_HERO_ACTION:
                 s = "HERO_ACTION";
                 break;
-                case Script::VAR_HERO_POS_JUMP_DOWN:
+                case VAR_HERO_POS_JUMP_DOWN:
                 s = "VAR_HERO_POS_JUMP_DOWN";
                 break;
-                case Script::VAR_HERO_POS_LEFT_RIGHT:
+                case VAR_HERO_POS_LEFT_RIGHT:
                 s = "VAR_HERO_POS_LEFT_RIGHT";
                 break;
-                case Script::VAR_HERO_POS_MASK:
+                case VAR_HERO_POS_MASK:
                 s = "VAR_HERO_POS_MASK";
                 break;
-                case Script::VAR_HERO_ACTION_POS_MASK:
+                case VAR_HERO_ACTION_POS_MASK:
                 s = "VAR_HERO_ACTION_POS_MASK";
                 break;
-                case Script::VAR_PAUSE_SLICES:
+                case VAR_PAUSE_SLICES:
                 s = "VAR_PAUSE_SLICES";
                 break;
                 default:
-                snprintf(tmp, 16, "VAR%u", i);
+                snprintf(tmp, 16, "VAR%02X", i);
                 s = tmp;
                 break;
             }
-            ImGui::Text("%s = %d", s, ui->script.vars[i]);
+            ImGui::Text("%s = %d", s, ui->game->vm.vars[i]);
         }
     }
     ImGui::End();
@@ -384,9 +383,9 @@ static void _ui_game_draw_video(ui_game_t* ui) {
         if (ImGui::CollapsingHeader("Palette", ImGuiTreeNodeFlags_DefaultOpen)) {
             for (int col = 0; col < 16; col++) {
                 ImGui::PushID(col);
-                ImColor c = ImColor(ui->game->palette[col]);
+                ImColor c = ImColor(ui->game->gfx.palette[col]);
                 if(ImGui::ColorEdit3("##hw_color", &c.Value.x, ImGuiColorEditFlags_NoInputs)) {
-                    ui->game->palette[col] = (ImU32)c;
+                    ui->game->gfx.palette[col] = (ImU32)c;
                 }
                 ImGui::PopID();
                 if (col != 4) {
@@ -450,11 +449,10 @@ void ui_game_init(ui_game_t* ui, const ui_game_desc_t* ui_desc) {
         game_get_resources(ui->game, &ui->res.res);
     }
     {
-        ui->script.x = 10;
-        ui->script.y = 20;
-        ui->script.w = 562;
-        ui->script.h = 568;
-        game_get_vars(ui->game, &ui->script.vars);
+        ui->vm.x = 10;
+        ui->vm.y = 20;
+        ui->vm.w = 562;
+        ui->vm.h = 568;
     }
     {
         ui_dasm_desc_t desc = {0};
@@ -491,7 +489,7 @@ void ui_game_draw(ui_game_t* ui) {
     _ui_game_draw_menu(ui);
     _ui_game_draw_resources(ui);
     _ui_game_draw_video(ui);
-    _ui_game_draw_script(ui);
+    _ui_game_draw_vm(ui);
     for (int i = 0; i < 4; i++) {
         ui_dasm_draw(&ui->dasm[i]);
     }

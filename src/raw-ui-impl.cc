@@ -7,7 +7,6 @@
 #include "gfx.h"
 #include "common.h"
 #include "game.h"
-#include "script.h"
 #define GAME_UI_IMPL
 #include "imgui.h"
 #include "resource.h"
