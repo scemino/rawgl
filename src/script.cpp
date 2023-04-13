@@ -268,7 +268,6 @@ void Script::op_updateDisplay() {
 	_timeStamp = _stub->getTimeStamp();
 	_scriptVars[0xF7] = 0;
 
-	_vid->_displayHead = !((_res->_currentPart == 16004 && _screenNum == 37) || (_res->_currentPart == 16006 && _screenNum == 202));
 	_vid->updateDisplay(page, _stub);
 }
 
@@ -331,10 +330,6 @@ void Script::op_playSound() {
 	snd_playSound(resNum, freq, vol, channel);
 }
 
-static void preloadSoundCb(void *userdata, int soundNum, const uint8_t *data) {
-	((Script *)userdata)->snd_preloadSound(soundNum, data);
-}
-
 void Script::op_updateResources() {
 	uint16_t num = _scriptPtr.fetchWord();
 	debug(DBG_SCRIPT, "Script::op_updateResources(%d)", num);
@@ -343,7 +338,7 @@ void Script::op_updateResources() {
 		_mix->stopAll();
 		_res->invalidateRes();
 	} else {
-		_res->update(num, preloadSoundCb, this);
+		_res->update(num);
 	}
 }
 
@@ -578,23 +573,6 @@ void Script::inp_handleSpecialKeys() {
 	}
 }
 
-static uint8_t getWavLooping(uint16_t resNum) {
-	switch (resNum) {
-	case 1:
-	case 3:
-	case 8:
-	case 16:
-	case 89:
-	case 97:
-	case 102:
-	case 104:
-	case 106:
-	case 132:
-	case 139: return 1;
-	}
-	return 0;
-}
-
 static int getSoundFreq(uint8_t period) {
 	return kPaulaFreq / (Script::_periodTable[period] * 2);
 }
@@ -628,7 +606,6 @@ void Script::snd_playSound(uint16_t resNum, uint8_t freq, uint8_t vol, uint8_t c
 
 void Script::snd_playMusic(uint16_t resNum, uint16_t delay, uint8_t pos) {
 	debug(DBG_SND, "snd_playMusic(0x%X, %d, %d)", resNum, delay, pos);
-	uint8_t loop = 0;
 	// DT_AMIGA, DT_ATARI, DT_DOS
     if (resNum != 0) {
         _ply->loadSfxModule(resNum, delay, pos);
@@ -639,9 +616,6 @@ void Script::snd_playMusic(uint16_t resNum, uint16_t delay, uint8_t pos) {
     } else {
         _mix->stopSfxMusic();
     }
-}
-
-void Script::snd_preloadSound(uint16_t resNum, const uint8_t *data) {
 }
 
 void Script::fixUpPalette_changeScreen(int part, int screen) {

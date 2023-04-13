@@ -8,7 +8,6 @@
 #include "graphics_sokol.h"
 #include "mixer.h"
 #include "resource.h"
-#include "resource_nth.h"
 #include "script.h"
 #include "sfxplayer.h"
 #include "systemstub.h"
@@ -57,7 +56,6 @@ public:
 GameState* _state;
 bool Script::_useRemasteredAudio = true;
 bool Graphics::_is1991 = false;
-bool Graphics::_use555 = false;
 bool Video::_useEGA = false;
 Difficulty Script::_difficulty = DIFFICULTY_NORMAL;
 
@@ -86,7 +84,6 @@ void game_init(game_t* game, const game_desc_t* desc) {
     _state->_res.detectVersion();
     _state->_vid.init();
     _state->_res._lang = lang;
-    _state->_res.allocMemBlock();
 	_state->_res.readEntries();
 
 	debug(DBG_INFO, "Using sokol graphics");
@@ -101,7 +98,7 @@ void game_init(game_t* game, const game_desc_t* desc) {
         }
     };
     _state->_graphics.setBuffers(&fbs);
-    _state->_graphics.init(GFX_W, GFX_H);
+    _state->_graphics.init();
 	_state->_vid.setDefaultFont();
 
     if (desc->demo3_joy_inputs && _state->_res.getDataType() == Resource::DT_DOS) {
@@ -111,13 +108,11 @@ void game_init(game_t* game, const game_desc_t* desc) {
     _state->_sys.setBuffer(game->fb, game->palette);
     _state->_script._stub = &_state->_sys;
 	_state->_script.init();
-    MixerType mixerType = kMixerTypeRaw;
     switch (_state->_res.getDataType()) {
     case Resource::DT_DOS:
     case Resource::DT_AMIGA:
     case Resource::DT_ATARI:
     case Resource::DT_ATARI_DEMO:
-        mixerType = kMixerTypeRaw;
         switch (lang) {
         case LANG_FR:
             _state->_vid._stringsTable = Video::_stringsTableFr;
@@ -130,7 +125,7 @@ void game_init(game_t* game, const game_desc_t* desc) {
         break;
     }
     _state->_mix.callback = desc->audio.callback;
-    _state->_mix.init(mixerType);
+    _state->_mix.init();
 
     Video::_useEGA = desc->use_ega;
     // bypass protection ?
@@ -206,7 +201,6 @@ void game_cleanup(game_t* game) {
     _state->_graphics.fini();
 	_state->_ply.stop();
 	_state->_mix.quit();
-	_state->_res.freeMemBlock();
     delete _state;
 }
 

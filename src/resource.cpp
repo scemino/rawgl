@@ -6,10 +6,6 @@
 
 #include "resource.h"
 #include "file.h"
-#include "pak.h"
-#include "resource_nth.h"
-#include "resource_win31.h"
-#include "resource_3do.h"
 #include "unpack.h"
 #include "util.h"
 #include "video.h"
@@ -29,6 +25,10 @@ Resource::Resource(Video *vid, const char *dataDir)
 	_lang = LANG_FR;
 	_amigaMemList = 0;
 	memset(&_demo3Joy, 0, sizeof(_demo3Joy));
+    _memPtrStart = (uint8_t *)_mem;
+	_scriptBakPtr = _scriptCurPtr = _memPtrStart;
+	_vidCurPtr = _memPtrStart + MEM_BLOCK_SIZE - (320 * 200 / 2); // 4bpp bitmap
+	_useSegVideo2 = false;
 }
 
 Resource::~Resource() {
@@ -67,48 +67,26 @@ bool Resource::readBank(const MemEntry *me, uint8_t *dstBuf) {
 	return ret;
 }
 
-static bool check15th(File &f, const char *dataDir) {
-	char path[MAXPATHLEN];
-	snprintf(path, sizeof(path), "%s/Data", dataDir);
-	return f.open(Pak::FILENAME, path);
-}
-
-static bool check20th(File &f, const char *dataDir) {
-	char path[MAXPATHLEN];
-	snprintf(path, sizeof(path), "%s/game/DAT", dataDir);
-	return f.open("FILE017.DAT", path);
-}
-
-static bool check3DO(File &f, const char *dataDir) {
-	const char *ext = strrchr(dataDir, '.');
-	if (ext && strcasecmp(ext, ".iso") == 0) {
-		return f.open(dataDir);
-	}
-	char path[MAXPATHLEN];
-	snprintf(path, sizeof(path), "%s/GameData", dataDir);
-	return f.open("File340", path);
-}
-
-static const AmigaMemEntry *detectAmigaAtari(File &f, const char *dataDir) {
-	static const struct {
-		uint32_t bank01Size;
-		const AmigaMemEntry *entries;
-	} _files[] = {
-		{ 244674, Resource::_memListAmigaFR },
-		{ 244868, Resource::_memListAmigaEN },
-		{ 227142, Resource::_memListAtariEN },
-		{ 0, 0 }
-	};
-	if (f.open("bank01", dataDir)) {
-		const uint32_t size = f.size();
-		for (int i = 0; _files[i].entries; ++i) {
-			if (_files[i].bank01Size == size) {
-				return _files[i].entries;
-			}
-		}
-	}
-	return 0;
-}
+//static const AmigaMemEntry *detectAmigaAtari(File &f, const char *dataDir) {
+//	static const struct {
+//		uint32_t bank01Size;
+//		const AmigaMemEntry *entries;
+//	} _files[] = {
+//		{ 244674, Resource::_memListAmigaFR },
+//		{ 244868, Resource::_memListAmigaEN },
+//		{ 227142, Resource::_memListAtariEN },
+//		{ 0, 0 }
+//	};
+//	if (f.open("bank01", dataDir)) {
+//		const uint32_t size = f.size();
+//		for (int i = 0; _files[i].entries; ++i) {
+//			if (_files[i].bank01Size == size) {
+//				return _files[i].entries;
+//			}
+//		}
+//	}
+//	return 0;
+//}
 
 void Resource::detectVersion() {
 	File f;
@@ -228,29 +206,6 @@ void Resource::readEntriesAmiga(const AmigaMemEntry *entries, int count) {
 	_memList[count].status = 0xFF;
 }
 
-void Resource::dumpEntries() {
-	static const bool kDump = false;
-	if (kDump && (_dataType == DT_DOS || _dataType == DT_AMIGA || _dataType == DT_ATARI)) {
-		for (int i = 0; i < _numMemList; ++i) {
-			if (_memList[i].unpackedSize == 0) {
-				continue;
-			}
-			if (_memList[i].bankNum == 5 && (_dataType == DT_AMIGA || _dataType == DT_ATARI)) {
-				continue;
-			}
-			uint8_t *p = (uint8_t *)malloc(_memList[i].unpackedSize);
-			if (p) {
-				if (readBank(&_memList[i], p)) {
-					char name[16];
-					snprintf(name, sizeof(name), "data_%02x_%d", i, _memList[i].type);
-					dumpFile(name, p, _memList[i].unpackedSize);
-				}
-				free(p);
-			}
-		}
-	}
-}
-
 void Resource::load() {
 	while (1) {
 		MemEntry *me = 0;
@@ -328,54 +283,7 @@ void Resource::invalidateAll() {
 	_vid->_currentPal = 0xFF;
 }
 
-static const uint8_t *getSoundsList3DO(int num) {
-	static const uint8_t intro7[] = {
-		0x33, 0xFF
-	};
-	static const uint8_t water7[] = {
-		0x08, 0x10, 0x2D, 0x30, 0x31, 0x32, 0x35, 0x39, 0x3A, 0x3C,
-		0x3D, 0x3E, 0x4A, 0x4B, 0x4D, 0x4E, 0x4F, 0x50, 0x51, 0x52,
-		0x54, 0xFF
-	};
-	static const uint8_t pri1[] = {
-		0x52, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5A, 0x5B, 0x5C, 0x5D,
-		0x5E, 0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68,
-		0x69, 0x70, 0x71, 0x72, 0x73, 0xFF
-	};
-	static const uint8_t cite1[] = {
-		0x02, 0x03, 0x52, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5A, 0x5B,
-		0x5C, 0x5D, 0x5E, 0x5F, 0x60, 0x63, 0x66, 0x6A, 0x6B, 0x6C,
-		0x6D, 0x6E, 0x6F, 0x70, 0x72, 0x74, 0x75, 0x77, 0x78, 0x79,
-		0x7A, 0x7B, 0x7C, 0x88, 0xFF
-	};
-	static const uint8_t arene2[] = {
-		0x52, 0x57, 0x58, 0x59, 0x5B, 0x84, 0x8B, 0x8C, 0x8E, 0xFF
-	};
-	static const uint8_t luxe2[] = {
-		0x30, 0x52, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5A, 0x5B, 0x5C,
-		0x5D, 0x5E, 0x5F, 0x60, 0x66, 0x67, 0x6B, 0x6C, 0x70, 0x74,
-		0x75, 0x79, 0x7A, 0x8D, 0xFF
-	};
-	static const uint8_t final3[] = {
-		0x08, 0x0E, 0x0F, 0x57, 0xFF
-	};
-	switch (num) {
-	case 2001: return intro7;
-	case 2002: return water7;
-	case 2003: return pri1;
-	case 2004: return cite1;
-	case 2005: return arene2;
-	case 2006: return luxe2;
-	case 2007: return final3;
-	}
-	return 0;
-}
-
-static const int _memListBmp[] = {
-	145, 144, 73, 72, 70, 69, 68, 67, -1
-};
-
-void Resource::update(uint16_t num, PreloadSoundProc preloadSound, void *data) {
+void Resource::update(uint16_t num) {
 	if (num > 16000) {
 		_nextPart = num;
 		return;
@@ -402,8 +310,7 @@ const uint8_t Resource::_memListParts[][4] = {
 };
 
 void Resource::setupPart(int ptrId) {
-	int firstPart = kPartCopyProtection;
-    if (ptrId != _currentPart) {
+	if (ptrId != _currentPart) {
         uint8_t ipal = 0;
         uint8_t icod = 0;
         uint8_t ivd1 = 0;
@@ -434,18 +341,6 @@ void Resource::setupPart(int ptrId) {
         _currentPart = ptrId;
     }
     _scriptBakPtr = _scriptCurPtr;
-}
-
-void Resource::allocMemBlock() {
-	_memPtrStart = (uint8_t *)malloc(MEM_BLOCK_SIZE);
-	_scriptBakPtr = _scriptCurPtr = _memPtrStart;
-	_vidCurPtr = _memPtrStart + MEM_BLOCK_SIZE - (320 * 200 / 2); // 4bpp bitmap
-	_useSegVideo2 = false;
-}
-
-void Resource::freeMemBlock() {
-	free(_memPtrStart);
-	_memPtrStart = 0;
 }
 
 void Resource::readDemo3Joy() {

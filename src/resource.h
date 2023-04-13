@@ -64,8 +64,6 @@ struct ResourceWin31;
 struct Resource3do;
 struct Video;
 
-typedef void (*PreloadSoundProc)(void *userdata, int num, const uint8_t *data);
-
 struct Resource {
 
 	enum ResType {
@@ -105,6 +103,7 @@ struct Resource {
 	Video *_vid;
 	const char *_dataDir;
 	MemEntry _memList[ENTRIES_COUNT_20TH];
+    uint8_t _mem[MEM_BLOCK_SIZE];
 	uint16_t _numMemList;
 	uint16_t _currentPart, _nextPart;
 	uint8_t *_memPtrStart, *_scriptBakPtr, *_scriptCurPtr, *_vidCurPtr;
@@ -129,14 +128,11 @@ struct Resource {
 	bool readBank(const MemEntry *me, uint8_t *dstBuf);
 	void readEntries();
 	void readEntriesAmiga(const AmigaMemEntry *entries, int count);
-	void dumpEntries();
 	void load();
 	void invalidateAll();
 	void invalidateRes();
-	void update(uint16_t num, PreloadSoundProc, void *);
+	void update(uint16_t num);
 	void setupPart(int part);
-	void allocMemBlock();
-	void freeMemBlock();
 	void readDemo3Joy();
 };
 

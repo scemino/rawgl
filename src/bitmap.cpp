@@ -26,7 +26,7 @@ static void clut(const uint8_t *src, const uint8_t *pal, int pitch, int w, int h
 	}
 }
 
-uint8_t *decode_bitmap(const uint8_t *src, bool alpha, int colorKey, int *w, int *h) {
+uint8_t *decode_bitmap(const uint8_t *src, int *w, int *h) {
 	if (memcmp(src, "BM", 2) != 0) {
 		return 0;
 	}
@@ -39,7 +39,7 @@ uint8_t *decode_bitmap(const uint8_t *src, bool alpha, int colorKey, int *w, int
 		warning("Unhandled bitmap depth %d compression %d", depth, compression);
 		return 0;
 	}
-	const int bpp = (!alpha && colorKey < 0) ? 3 : 4;
+	const int bpp = 3;
 	uint8_t *dst = (uint8_t *)malloc(width * height * bpp);
 	if (!dst) {
 		warning("Failed to allocate bitmap buffer, width %d height %d bpp %d", width, height, bpp);
@@ -48,7 +48,7 @@ uint8_t *decode_bitmap(const uint8_t *src, bool alpha, int colorKey, int *w, int
 	if (depth == 8) {
 		const uint8_t *palette = src + 14 /* BITMAPFILEHEADER */ + 40 /* BITMAPINFOHEADER */;
 		const bool flipY = true;
-		clut(src + imageOffset, palette, (width + 3) & ~3, width, height, bpp, flipY, colorKey, dst);
+		clut(src + imageOffset, palette, (width + 3) & ~3, width, height, bpp, flipY, -1, dst);
 	} else {
 		assert(depth == 32 && bpp == 3);
 		const uint8_t *p = src + imageOffset;

@@ -29,21 +29,13 @@ struct Video {
 	static const StrEntry _stringsTableFr[];
 	static const StrEntry _stringsTableEng[];
 	static const StrEntry _stringsTableDemo[];
-	static const uint16_t _stringsId15th[];
-	static const char *_stringsTable15th[];
 	static const char *_str0x194AtariDemo;
-	static const StrEntry _stringsTable3DO[];
-	static const char *_noteText3DO;
-	static const char *_endText3DO;
-	static const uint8_t *_vertices3DO[201];
 	static const uint8_t _paletteEGA[];
 
 	static bool _useEGA;
 
 	Resource *_res;
 	Graphics *_graphics;
-	bool _hasHeadSprites;
-	bool _displayHead;
 
 	uint8_t _nextPal, _currentPal;
 	uint8_t _buffers[3];
@@ -51,23 +43,14 @@ struct Video {
 	uint8_t *_dataBuf;
 	const StrEntry *_stringsTable;
 	uint8_t _tempBitmap[BITMAP_W * BITMAP_H];
-	uint16_t _bitmap555[BITMAP_W * BITMAP_H];
-	const Scaler *_scaler;
-	int _scalerFactor;
-	uint8_t *_scalerBuffer;
 
 	Video(Resource *res);
 	~Video();
 	void init();
 
-	void setScaler(const char *name, int factor);
 	void setDefaultFont();
-	void setFont(const uint8_t *font);
-	void setHeads(const uint8_t *src);
 	void setDataBuffer(uint8_t *dataBuf, uint16_t offset);
 	void drawShape(uint8_t color, uint16_t zoom, const Point *pt);
-	void drawShapePart3DO(int color, int part, const Point *pt);
-	void drawShape3DO(int color, int zoom, const Point *pt);
 	void fillPolygon(uint16_t color, uint16_t zoom, const Point *pt);
 	void drawShapeParts(uint16_t zoom, const Point *pt);
 	void drawString(uint8_t color, uint16_t x, uint16_t y, uint16_t strId);
@@ -81,7 +64,6 @@ struct Video {
 	void updateDisplay(uint8_t page, SystemStub *stub);
 	void captureDisplay();
 	void setPaletteColor(uint8_t color, int r, int g, int b);
-	void drawRect(uint8_t page, uint8_t color, int x1, int y1, int x2, int y2);
 };
 
 #endif

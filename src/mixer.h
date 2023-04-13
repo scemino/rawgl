@@ -12,39 +12,27 @@
 #include "common.h"
 #include "game.h"
 
-struct AifcPlayer;
 struct SfxPlayer;
 struct Mixer_impl;
 
-enum MixerType {
-	kMixerTypeRaw,
-
-};
-
 struct Mixer {
-	AifcPlayer *_aifc;
 	SfxPlayer *_sfx;
 	Mixer_impl *_impl;
     game_audio_callback_t callback;
 
 	Mixer(SfxPlayer *sfx);
-	void init(MixerType mixerType);
+	void init();
 	void quit();
 	void update(int num_samples);
 
 	void playSoundRaw(uint8_t channel, const uint8_t *data, uint16_t freq, uint8_t volume);
-	void playSoundWav(uint8_t channel, const uint8_t *data, uint16_t freq, uint8_t volume, uint8_t loop);
 	void stopSound(uint8_t channel);
 	void setChannelVolume(uint8_t channel, uint8_t volume);
 	void playMusic(const char *path, uint8_t loop);
 	void stopMusic();
-	void playAifcMusic(const char *path, uint32_t offset);
-	void stopAifcMusic();
 	void playSfxMusic(int num);
 	void stopSfxMusic();
 	void stopAll();
-	void preloadSoundAiff(uint8_t num, const uint8_t *data);
-	void playSoundAiff(uint8_t channel, uint8_t num, uint8_t volume);
 };
 
 #endif

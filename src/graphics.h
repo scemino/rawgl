@@ -40,7 +40,6 @@ struct Graphics {
 
 	static const uint8_t _font[];
 	static bool _is1991; // draw graphics as in the original 1991 game release
-	static bool _use555; // use 16bits graphics buffer (for 3DO)
 	static const uint16_t _shapesMaskOffset[];
 	static const int _shapesMaskCount;
 	static const uint8_t _shapesMaskData[];
@@ -50,12 +49,11 @@ struct Graphics {
 
 	virtual ~Graphics() {};
 
-	virtual void init(int targetW, int targetH) { _screenshot = false; }
+	virtual void init() { _screenshot = false; }
 	virtual void fini() {}
 
 	virtual void setFont(const uint8_t *src, int w, int h) = 0;
 	virtual void setPalette(const Color *colors, int count) = 0;
-	virtual void setSpriteAtlas(const uint8_t *src, int w, int h, int xSize, int ySize) = 0;
 	virtual void drawSprite(int buffer, int num, const Point *pt, uint8_t color) = 0;
 	virtual void drawBitmap(int buffer, const uint8_t *data, int w, int h, int fmt) = 0;
 	virtual void drawPoint(int buffer, uint8_t color, const Point *pt) = 0;
@@ -64,7 +62,6 @@ struct Graphics {
 	virtual void clearBuffer(int num, uint8_t color) = 0;
 	virtual void copyBuffer(int dst, int src, int vscroll = 0) = 0;
 	virtual void drawBuffer(int num, SystemStub *) = 0;
-	virtual void drawRect(int num, uint8_t color, const Point *pt, int w, int h) = 0;
 	virtual void drawBitmapOverlay(const uint8_t *data, int w, int h, int fmt, SystemStub *stub) = 0;
 };
 

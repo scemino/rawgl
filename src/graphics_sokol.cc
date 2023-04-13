@@ -3,41 +3,25 @@
 #include "graphics_sokol.h"
 #include "graphics.h"
 #include "util.h"
-#include "screenshot.h"
 #include "systemstub.h"
 #include "sokol_sys.h"
 
 GraphicsSokol::GraphicsSokol() {
 	_fixUpPalette = FIXUP_PALETTE_NONE;
 	memset(_pagePtrs, 0, sizeof(_pagePtrs));
-	_colorBuffer = 0;
 	memset(_pal, 0, sizeof(_pal));
     memset(_palette, 0, sizeof(_palette));
-	_screenshotNum = 1;
+
+    _u = (GFX_W << 16) / GFX_W;
+	_v = (GFX_H << 16) / GFX_H;
 }
 
-GraphicsSokol::~GraphicsSokol() {
-	for (int i = 0; i < 4; ++i) {
-		_pagePtrs[i] = 0;
-	}
-	free(_colorBuffer);
-}
-
-void GraphicsSokol::setSize(int w, int h) {
-	_u = (w << 16) / GFX_W;
-	_v = (h << 16) / GFX_H;
-	_w = w;
-	_h = h;
-	_byteDepth = _use555 ? 2 : 1;
-	assert(_byteDepth == 1 || _byteDepth == 2);
-	_colorBuffer = (uint8_t *)realloc(_colorBuffer, _w * _h * sizeof(uint8_t));
-	if (!_colorBuffer) {
-		error("Unable to allocate color buffer w %d h %d", _w, _h);
-	}
-	for (int i = 0; i < 4; ++i) {
-		memset(_pagePtrs[i], 0, getPageSize());
-	}
-	setWorkPagePtr(2);
+void GraphicsSokol::init() {
+    Graphics::init();
+    for (int i = 0; i < 4; ++i) {
+        memset(_pagePtrs[i], 0, getPageSize());
+    }
+    setWorkPagePtr(2);
 }
 
 static uint32_t calcStep(const Point &p1, const Point &p2, uint16_t &dy) {
@@ -48,11 +32,6 @@ static uint32_t calcStep(const Point &p1, const Point &p2, uint16_t &dy) {
 
 void GraphicsSokol::drawPolygon(uint8_t color, const QuadStrip &quadStrip) {
 	QuadStrip qs = quadStrip;
-	if (_w != GFX_W || _h != GFX_H) {
-		for (int i = 0; i < qs.numVertices; ++i) {
-			qs.vertices[i].scale(_u, _v);
-		}
-	}
 
 	int i = 0;
 	int j = qs.numVertices - 1;
@@ -104,16 +83,16 @@ void GraphicsSokol::drawPolygon(uint8_t color, const QuadStrip &quadStrip) {
 				if (hliney >= 0) {
 					x1 = cpt1 >> 16;
 					x2 = cpt2 >> 16;
-					if (x1 < _w && x2 >= 0) {
+					if (x1 < GFX_W && x2 >= 0) {
 						if (x1 < 0) x1 = 0;
-						if (x2 >= _w) x2 = _w - 1;
+						if (x2 >= GFX_W) x2 = GFX_W - 1;
 						(this->*pdl)(x1, x2, hliney, color);
 					}
 				}
 				cpt1 += step1;
 				cpt2 += step2;
 				++hliney;
-				if (hliney >= _h) return;
+				if (hliney >= GFX_H) return;
 			}
 		}
 	}
@@ -124,27 +103,15 @@ void GraphicsSokol::drawChar(uint8_t c, uint16_t x, uint16_t y, uint8_t color) {
 		x = xScale(x);
 		y = yScale(y);
 		const uint8_t *ft = _font + (c - 0x20) * 8;
-		const int offset = (x + y * _w) * _byteDepth;
-		if (_byteDepth == 1) {
-			for (int j = 0; j < 8; ++j) {
-				const uint8_t ch = ft[j];
-				for (int i = 0; i < 8; ++i) {
-					if (ch & (1 << (7 - i))) {
-						_drawPagePtr[offset + j * _w + i] = color;
-					}
-				}
-			}
-		} else if (_byteDepth == 2) {
-			const uint16_t rgbColor = _pal[color].rgb555();
-			for (int j = 0; j < 8; ++j) {
-				const uint8_t ch = ft[j];
-				for (int i = 0; i < 8; ++i) {
-					if (ch & (1 << (7 - i))) {
-						((uint16_t *)(_drawPagePtr + offset))[j * _w + i] = rgbColor;
-					}
-				}
-			}
-		}
+		const int offset = (x + y * GFX_W);
+        for (int j = 0; j < 8; ++j) {
+            const uint8_t ch = ft[j];
+            for (int i = 0; i < 8; ++i) {
+                if (ch & (1 << (7 - i))) {
+                    _drawPagePtr[offset + j * GFX_W + i] = color;
+                }
+            }
+        }
 	}
 }
 void GraphicsSokol::drawSpriteMask(int x, int y, uint8_t color, const uint8_t *data) {
@@ -152,102 +119,59 @@ void GraphicsSokol::drawSpriteMask(int x, int y, uint8_t color, const uint8_t *d
 	x = xScale(x - w / 2);
 	const int h = *data++;
 	y = yScale(y - h / 2);
-	assert(_byteDepth == 1);
 	for (int j = 0; j < h; ++j) {
 		const int yoffset = y + j;
 		for (int i = 0; i <= w / 16; ++i) {
 			const uint16_t mask = READ_BE_UINT16(data); data += 2;
-			if (yoffset < 0 || yoffset >= _h) {
+			if (yoffset < 0 || yoffset >= GFX_H) {
 				continue;
 			}
 			const int xoffset = x + i * 16;
 			for (int b = 0; b < 16; ++b) {
-				if (xoffset + b < 0 || xoffset + b >= _w) {
+				if (xoffset + b < 0 || xoffset + b >= GFX_W) {
 					continue;
 				}
 				if (mask & (1 << (15 - b))) {
-					_drawPagePtr[yoffset * _w + xoffset + b] = color;
+					_drawPagePtr[yoffset * GFX_W + xoffset + b] = color;
 				}
 			}
 		}
-	}
-}
-
-static void blend_rgb555(uint16_t *dst, const uint16_t b) {
-	static const uint16_t RB_MASK = 0x7c1f;
-	static const uint16_t G_MASK  = 0x03e0;
-	uint16_t a = *dst;
-	if ((a & 0x8000) == 0) { // use bit 15 to prevent additive blending
-		uint16_t r = 0x8000;
-		r |= (((a & RB_MASK) + (b & RB_MASK)) >> 1) & RB_MASK;
-		r |= (((a &  G_MASK) + (b &  G_MASK)) >> 1) &  G_MASK;
-		*dst = r;
 	}
 }
 
 void GraphicsSokol::drawPoint(int16_t x, int16_t y, uint8_t color) {
 	x = xScale(x);
 	y = yScale(y);
-	const int offset = (y * _w + x) * _byteDepth;
-	if (_byteDepth == 1) {
-		switch (color) {
-		case COL_ALPHA:
-			_drawPagePtr[offset] |= 8;
-			break;
-		case COL_PAGE:
-			_drawPagePtr[offset] = *(_pagePtrs[0] + offset);
-			break;
-		default:
-			_drawPagePtr[offset] = color;
-			break;
-		}
-	} else if (_byteDepth == 2) {
-		switch (color) {
-		case COL_ALPHA:
-			blend_rgb555((uint16_t *)(_drawPagePtr + offset), _pal[ALPHA_COLOR_INDEX].rgb555());
-			break;
-		case COL_PAGE:
-			*(uint16_t *)(_drawPagePtr + offset) = *(uint16_t *)(_pagePtrs[0] + offset);
-			break;
-		default:
-			*(uint16_t *)(_drawPagePtr + offset) = _pal[color].rgb555();
-			break;
-		}
-	}
+	const int offset = (y * GFX_W + x);
+    switch (color) {
+    case COL_ALPHA:
+        _drawPagePtr[offset] |= 8;
+        break;
+    case COL_PAGE:
+        _drawPagePtr[offset] = *(_pagePtrs[0] + offset);
+        break;
+    default:
+        _drawPagePtr[offset] = color;
+        break;
+    }
 }
 
 void GraphicsSokol::drawLineT(int16_t x1, int16_t x2, int16_t y, uint8_t color) {
 	int16_t xmax = MAX(x1, x2);
 	int16_t xmin = MIN(x1, x2);
 	int w = xmax - xmin + 1;
-	const int offset = (y * _w + xmin) * _byteDepth;
-	if (_byteDepth == 1) {
-		for (int i = 0; i < w; ++i) {
-			_drawPagePtr[offset + i] |= 8;
-		}
-	} else if (_byteDepth == 2) {
-		const uint16_t rgbColor = _pal[ALPHA_COLOR_INDEX].rgb555();
-		uint16_t *p = (uint16_t *)(_drawPagePtr + offset);
-		for (int i = 0; i < w; ++i) {
-			blend_rgb555(p + i, rgbColor);
-		}
-	}
+	const int offset = (y * GFX_W + xmin);
+	for (int i = 0; i < w; ++i) {
+        _drawPagePtr[offset + i] |= 8;
+    }
 }
 
 void GraphicsSokol::drawLineN(int16_t x1, int16_t x2, int16_t y, uint8_t color) {
 	int16_t xmax = MAX(x1, x2);
 	int16_t xmin = MIN(x1, x2);
 	const int w = xmax - xmin + 1;
-	const int offset = (y * _w + xmin) * _byteDepth;
-	if (_byteDepth == 1) {
-		memset(_drawPagePtr + offset, color, w);
-	} else if (_byteDepth == 2) {
-		const uint16_t rgbColor = _pal[color].rgb555();
-		uint16_t *p = (uint16_t *)(_drawPagePtr + offset);
-		for (int i = 0; i < w; ++i) {
-			p[i] = rgbColor;
-		}
-	}
+	const int offset = (y * GFX_W + xmin);
+	memset(_drawPagePtr + offset, color, w);
 }
 
 void GraphicsSokol::drawLineP(int16_t x1, int16_t x2, int16_t y, uint8_t color) {
@@ -257,8 +181,8 @@ void GraphicsSokol::drawLineP(int16_t x1, int16_t x2, int16_t y, uint8_t color) 
 	int16_t xmax = MAX(x1, x2);
 	int16_t xmin = MIN(x1, x2);
 	const int w = xmax - xmin + 1;
-	const int offset = (y * _w + xmin) * _byteDepth;
-	memcpy(_drawPagePtr + offset, _pagePtrs[0] + offset, w * _byteDepth);
+	const int offset = (y * GFX_W + xmin);
+	memcpy(_drawPagePtr + offset, _pagePtrs[0] + offset, w);
 }
 
 uint8_t *GraphicsSokol::getPagePtr(uint8_t page) {
@@ -268,11 +192,6 @@ uint8_t *GraphicsSokol::getPagePtr(uint8_t page) {
 
 void GraphicsSokol::setWorkPagePtr(uint8_t page) {
 	_drawPagePtr = getPagePtr(page);
-}
-
-void GraphicsSokol::init(int targetW, int targetH) {
-	Graphics::init(targetW, targetH);
-	setSize(targetW, targetH);
 }
 
 void GraphicsSokol::setFont(const uint8_t *src, int w, int h) {
@@ -307,20 +226,10 @@ void GraphicsSokol::drawSprite(int buffer, int num, const Point *pt, uint8_t col
 }
 
 void GraphicsSokol::drawBitmap(int buffer, const uint8_t *data, int w, int h, int fmt) {
-	switch (_byteDepth) {
-	case 1:
-		if (fmt == FMT_CLUT && _w == w && _h == h) {
-			memcpy(getPagePtr(buffer), data, w * h);
-			return;
-		}
-		break;
-	case 2:
-		if (fmt == FMT_RGB555 && _w == w && _h == h) {
-			memcpy(getPagePtr(buffer), data, getPageSize());
-			return;
-		}
-		break;
-	}
+    if (fmt == FMT_CLUT && GFX_W == w && GFX_H == h) {
+        memcpy(getPagePtr(buffer), data, w * h);
+        return;
+    }
 	warning("GraphicsSokol::drawBitmap() unhandled fmt %d w %d h %d", fmt, w, h);
 }
 
@@ -340,15 +249,7 @@ void GraphicsSokol::drawStringChar(int buffer, uint8_t color, char c, const Poin
 }
 
 void GraphicsSokol::clearBuffer(int num, uint8_t color) {
-	if (_byteDepth == 1) {
-		memset(getPagePtr(num), color, getPageSize());
-	} else if (_byteDepth == 2) {
-		const uint16_t rgbColor = _pal[color].rgb555();
-		uint16_t *p = (uint16_t *)getPagePtr(num);
-		for (int i = 0; i < _w * _h; ++i) {
-			p[i] = rgbColor;
-		}
-	}
+	memset(getPagePtr(num), color, getPageSize());
 }
 
 void GraphicsSokol::copyBuffer(int dst, int src, int vscroll) {
@@ -357,18 +258,11 @@ void GraphicsSokol::copyBuffer(int dst, int src, int vscroll) {
 	} else if (vscroll >= -199 && vscroll <= 199) {
 		const int dy = yScale(vscroll);
 		if (dy < 0) {
-			memcpy(getPagePtr(dst), getPagePtr(src) - dy * _w * _byteDepth, (_h + dy) * _w * _byteDepth);
+			memcpy(getPagePtr(dst), getPagePtr(src) - dy * GFX_W, (GFX_H + dy) * GFX_W);
 		} else {
-			memcpy(getPagePtr(dst) + dy * _w * _byteDepth, getPagePtr(src), (_h - dy) * _w * _byteDepth);
+			memcpy(getPagePtr(dst) + dy * GFX_W, getPagePtr(src), (GFX_H - dy) * GFX_W);
 		}
 	}
-}
-
-static void dumpBuffer555(const uint16_t *src, int w, int h, int num) {
-	char name[32];
-	snprintf(name, sizeof(name), "screenshot-%d.tga", num);
-	saveTGA(name, src, w, h);
-	debug(DBG_INFO, "Written '%s'", name);
 }
 
 static void dumpPalette(uint8_t *dst, int w, const Color *pal) {
@@ -391,49 +285,15 @@ void GraphicsSokol::drawBuffer(int num, SystemStub *stub) {
 	int w, h;
 	float ar[4];
 	stub->prepareScreen(w, h, ar);
-	if (_byteDepth == 1) {
-		const uint8_t *src = getPagePtr(num);
-		memcpy(_colorBuffer, src, _w * _h);
-		if (0) {
-			dumpPalette(_colorBuffer, _w, _pal);
-		}
-        _stub->setScreenPixels(_colorBuffer, _w, _h);
-        // TODO: ?
-        // if (_screenshot) {
-		// 	dumpBuffer555(_colorBuffer, _w, _h, _screenshotNum);
-		// 	++_screenshotNum;
-		// 	_screenshot = false;
-		// }
-	} else if (_byteDepth == 2) {
-		const uint16_t *src = (uint16_t *)getPagePtr(num);
-		stub->setScreenPixels555(src, _w, _h);
-		if (_screenshot) {
-			dumpBuffer555(src, _w, _h, _screenshotNum);
-			++_screenshotNum;
-			_screenshot = false;
-		}
-	}
-	stub->updateScreen();
-}
 
-void GraphicsSokol::drawRect(int num, uint8_t color, const Point *pt, int w, int h) {
-	assert(_byteDepth == 2);
-	setWorkPagePtr(num);
-	const uint16_t rgbColor = _pal[color].rgb555();
-	const int x1 = xScale(pt->x);
-	const int y1 = yScale(pt->y);
-	const int x2 = xScale(pt->x + w - 1);
-	const int y2 = yScale(pt->y + h - 1);
-	// horizontal
-	for (int x = x1; x <= x2; ++x) {
-		*(uint16_t *)(_drawPagePtr + (y1 * _w + x) * _byteDepth) = rgbColor;
-		*(uint16_t *)(_drawPagePtr + (y2 * _w + x) * _byteDepth) = rgbColor;
-	}
-	// vertical
-	for (int y = y1; y <= y2; ++y) {
-		*(uint16_t *)(_drawPagePtr + (y * _w + x1) * _byteDepth) = rgbColor;
-		*(uint16_t *)(_drawPagePtr + (y * _w + x2) * _byteDepth) = rgbColor;
-	}
+    const uint8_t *src = getPagePtr(num);
+    memcpy(_colorBuffer, src, GFX_W * GFX_H);
+    if (0) {
+        dumpPalette(_colorBuffer, GFX_W, _pal);
+    }
+    _stub->setScreenPixels(_colorBuffer, GFX_W, GFX_H);
+
+	stub->updateScreen();
 }
 
 void GraphicsSokol::drawBitmapOverlay(const uint8_t *data, int w, int h, int fmt, SystemStub *stub) {

@@ -432,13 +432,6 @@ void Mixer::playSoundRaw(uint8_t channel, const uint8_t *data, uint16_t freq, ui
 	}
 }
 
-void Mixer::playSoundWav(uint8_t channel, const uint8_t *data, uint16_t freq, uint8_t volume, uint8_t loop) {
-	debug(DBG_SND, "Mixer::playSoundWav(%d, %d, %d)", channel, volume, loop);
-	if (_impl) {
-		return _impl->playSoundWav(channel, data, freq, volume, loop);
-	}
-}
-
 void Mixer::stopSound(uint8_t channel) {
 	debug(DBG_SND, "Mixer::stopChannel(%d)", channel);
 	if (_impl) {
