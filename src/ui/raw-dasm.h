@@ -123,7 +123,7 @@ static void _raw_dasm_u16(uint16_t val, raw_dasm_output_t out_cb, void* user_dat
 uint16_t raw_dasm_op(uint16_t pc, raw_dasm_input_t in_cb, raw_dasm_output_t out_cb, void* user_data) {
     GAME_ASSERT(in_cb);
     uint8_t op;
-    uint8_t u8; int8_t i8; uint16_t u16; int16_t i16;
+    uint8_t u8; uint16_t u16; int16_t i16;
     _FETCH_U8(op);
 
     /* opcode name */

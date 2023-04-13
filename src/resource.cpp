@@ -18,7 +18,7 @@
 static const char *atariDemo = "aw.tos";
 
 Resource::Resource(Video *vid, const char *dataDir)
-	: _vid(vid), _dataDir(dataDir), _currentPart(0), _nextPart(0), _dataType(DT_DOS), _nth(0), _win31(0), _3do(0) {
+	: _vid(vid), _dataDir(dataDir), _currentPart(0), _nextPart(0), _dataType(DT_DOS) {
 	_bankPrefix = "bank";
 	_hasPasswordScreen = true;
 	memset(_memList, 0, sizeof(_memList));
@@ -33,9 +33,6 @@ Resource::Resource(Video *vid, const char *dataDir)
 
 Resource::~Resource() {
 	free(_demo3Joy.bufPtr);
-	delete _nth;
-	delete _win31;
-	delete _3do;
 }
 
 bool Resource::readBank(const MemEntry *me, uint8_t *dstBuf) {
@@ -115,13 +112,7 @@ static const AmigaMemEntry *detectAmigaAtari(File &f, const char *dataDir) {
 
 void Resource::detectVersion() {
 	File f;
-	// if (check15th(f, _dataDir)) {
-	// 	_dataType = DT_15TH_EDITION;
-	// 	debug(DBG_INFO, "Using 15th anniversary edition data files");
-	// } else if (check20th(f, _dataDir)) {
-	// 	_dataType = DT_20TH_EDITION;
-	// 	debug(DBG_INFO, "Using 20th anniversary edition data files");
-	// } else if (f.open("memlist.bin", _dataDir)) {
+	// if (f.open("memlist.bin", _dataDir)) {
 	_dataType = DT_DOS;
 	debug(DBG_INFO, "Using DOS data files");
 	// } else if ((_amigaMemList = detectAmigaAtari(f, _dataDir)) != 0) {
@@ -132,12 +123,6 @@ void Resource::detectVersion() {
 	// 		_dataType = DT_AMIGA;
 	// 		debug(DBG_INFO, "Using Amiga data files");
 	// 	}
-	// } else if (f.open(ResourceWin31::FILENAME, _dataDir)) {
-	// 	_dataType = DT_WIN31;
-	// 	debug(DBG_INFO, "Using Win31 data files");
-	// } else if (check3DO(f, _dataDir)) {
-	// 	_dataType = DT_3DO;
-	// 	debug(DBG_INFO, "Using 3DO data files");
 	// } else if (f.open(atariDemo, _dataDir) && f.size() == 96513) {
 	// 	_dataType = DT_ATARI_DEMO;
 	// 	debug(DBG_INFO, "Using Atari demo file");
@@ -148,17 +133,9 @@ void Resource::detectVersion() {
 
 static const char *kGameTitleEU = "Another World";
 static const char *kGameTitleUS = "Out Of This World";
-static const char *kGameTitle15thEdition = "Another World 15th anniversary edition";
-static const char *kGameTitle20thEdition = "Another World 20th anniversary edition";
 
 const char *Resource::getGameTitle(Language lang) const {
 	switch (_dataType) {
-	case DT_15TH_EDITION:
-		return kGameTitle15thEdition;
-	case DT_20TH_EDITION:
-		return kGameTitle20thEdition;
-	case DT_3DO:
-		return kGameTitleUS;
 	case DT_DOS:
 		if (lang == LANG_US) {
 			return kGameTitleUS;
@@ -172,20 +149,6 @@ const char *Resource::getGameTitle(Language lang) const {
 
 void Resource::readEntries() {
 	switch (_dataType) {
-	case DT_15TH_EDITION:
-		_numMemList = ENTRIES_COUNT;
-		_nth = ResourceNth::create(15, _dataDir);
-		if (_nth && _nth->init()) {
-			return;
-		}
-		break;
-	case DT_20TH_EDITION:
-		_numMemList = ENTRIES_COUNT_20TH;
-		_nth = ResourceNth::create(20, _dataDir);
-		if (_nth && _nth->init()) {
-			return;
-		}
-		break;
 	case DT_AMIGA:
 	case DT_ATARI:
 		assert(_amigaMemList);
@@ -222,20 +185,6 @@ void Resource::readEntries() {
 					++me;
 				}
 			}
-		}
-		break;
-	case DT_WIN31:
-		_numMemList = ENTRIES_COUNT;
-		_win31 = new ResourceWin31(_dataDir);
-		if (_win31->readEntries()) {
-			return;
-		}
-		break;
-	case DT_3DO:
-		_numMemList = ENTRIES_COUNT;
-		_3do = new Resource3do(_dataDir);
-		if (_3do->readEntries()) {
-			return;
 		}
 		break;
 	case DT_ATARI_DEMO: {
@@ -431,190 +380,12 @@ void Resource::update(uint16_t num, PreloadSoundProc preloadSound, void *data) {
 		_nextPart = num;
 		return;
 	}
-	switch (_dataType) {
-	case DT_15TH_EDITION:
-	case DT_20TH_EDITION:
-		if (num >= 3000) {
-			loadBmp(num);
-			break;
-		} else if (num >= 2000) {
-			break;
-		}
-		/* fall-through */
-	case DT_WIN31:
-		if (num == 71 || num == 83) {
-			loadBmp(num);
-			break;
-		}
-		for (int i = 0; _memListBmp[i] != -1; ++i) {
-			if (num == _memListBmp[i]) {
-				loadBmp(num);
-				return;
-			}
-		}
-		break;
-	case DT_3DO:
-		if (num >= 2000) { // preload sounds
-			const uint8_t *soundsList = getSoundsList3DO(num);
-			for (int i = 0; soundsList[i] != 255; ++i) {
-				const int soundNum = soundsList[i];
-				loadDat(soundNum);
-				if (_memList[soundNum].status == STATUS_LOADED) {
-					preloadSound(data, soundNum, _memList[soundNum].bufPtr);
-				}
-			}
-		} else if (num >= 200) {
-			loadBmp(num);
-		}
-		break;
-	case DT_AMIGA:
-	case DT_ATARI:
-	case DT_ATARI_DEMO:
-	case DT_DOS:
-		MemEntry *me = &_memList[num];
-		if (me->status == STATUS_NULL) {
-			me->status = STATUS_TOLOAD;
-			load();
-		}
-		break;
-	}
-}
 
-void Resource::loadBmp(int num) {
-	uint32_t size = 0;
-	uint8_t *p = 0;
-	switch (_dataType) {
-	case DT_15TH_EDITION:
-	case DT_20TH_EDITION:
-		p = _nth->loadBmp(num);
-		break;
-	case DT_WIN31:
-		p = _win31->loadFile(num, 0, &size);
-		break;
-	case DT_3DO:
-		p = _3do->loadFile(num, 0, &size);
-		break;
-	default:
-		break;
-	}
-	if (p) {
-		_vid->copyBitmapPtr(p, size);
-		free(p);
-	}
-}
-
-uint8_t *Resource::loadDat(int num) {
-	assert(num < _numMemList);
-	if (_memList[num].status == STATUS_LOADED) {
-		return _memList[num].bufPtr;
-	}
-	uint32_t size = 0;
-	uint8_t *p = 0;
-	switch (_dataType) {
-	case DT_15TH_EDITION:
-	case DT_20TH_EDITION:
-		p = _nth->loadDat(num, _scriptCurPtr, &size);
-		break;
-	case DT_WIN31:
-		p = _win31->loadFile(num, _scriptCurPtr, &size);
-		break;
-	case DT_3DO:
-		p = _3do->loadFile(num, _scriptCurPtr, &size);
-		break;
-	default:
-		break;
-	}
-	if (p) {
-		_scriptCurPtr += size;
-		_memList[num].bufPtr = p;
-		_memList[num].status = STATUS_LOADED;
-	}
-	return p;
-}
-
-void Resource::loadFont() {
-	if (_nth) {
-		uint8_t *p = _nth->load("font.bmp");
-		if (p) {
-			_vid->setFont(p);
-			free(p);
-		}
-	}
-}
-
-void Resource::loadHeads() {
-	if (_nth) {
-		uint8_t *p = _nth->load("heads.bmp");
-		if (p) {
-			_vid->setHeads(p);
-			free(p);
-		}
-	}
-}
-
-uint8_t *Resource::loadWav(int num) {
-	if (_memList[num].status == STATUS_LOADED) {
-		return _memList[num].bufPtr;
-	}
-	uint32_t size = 0;
-	uint8_t *p = 0;
-	switch (_dataType) {
-	case DT_15TH_EDITION:
-	case DT_20TH_EDITION:
-		p = _nth->loadWav(num, _scriptCurPtr, &size);
-		break;
-	case DT_WIN31:
-		p = _win31->loadFile(num, _scriptCurPtr, &size);
-		break;
-	default:
-		break;
-	}
-	if (p && size != 0) {
-		_scriptCurPtr += size;
-		_memList[num].bufPtr = p;
-		_memList[num].status = STATUS_LOADED;
-	}
-	return p;
-}
-
-const char *Resource::getString(int num) {
-	switch (_dataType) {
-	case DT_15TH_EDITION:
-	case DT_20TH_EDITION:
-		return _nth->getString(_lang, num);
-	case DT_WIN31:
-		return _win31->getString(num);
-	default:
-		break;
-	}
-	return 0;
-}
-
-const char *Resource::getMusicPath(int num, char *buf, int bufSize, uint32_t *offset) {
-	const char *name = 0;
-	switch (_dataType) {
-	case DT_15TH_EDITION:
-	case DT_20TH_EDITION:
-		name = _nth->getMusicName(num);
-		break;
-	case DT_WIN31:
-		name = _win31->getMusicName(num);
-		break;
-	case DT_3DO:
-		assert(offset);
-		name = _3do->getMusicName(num, offset);
-		if (*offset != 0) {
-			return _dataDir; // playing music from .ISO
-		}
-		break;
-	default:
-		break;
-	}
-	if (name) {
-		snprintf(buf, bufSize, "%s/%s", _dataDir, name);
-		return buf;
-	}
-	return 0;
+    MemEntry *me = &_memList[num];
+    if (me->status == STATUS_NULL) {
+        me->status = STATUS_TOLOAD;
+        load();
+    }
 }
 
 const uint8_t Resource::_memListParts[][4] = {
@@ -632,69 +403,37 @@ const uint8_t Resource::_memListParts[][4] = {
 
 void Resource::setupPart(int ptrId) {
 	int firstPart = kPartCopyProtection;
-	switch (_dataType) {
-	case DT_15TH_EDITION:
-	case DT_20TH_EDITION:
-	case DT_3DO:
-		firstPart = kPartIntro;
-		/* fall-through */
-	case DT_WIN31:
-		if (ptrId >= firstPart && ptrId <= 16009) {
-			invalidateAll();
-			uint8_t **segments[4] = { &_segVideoPal, &_segCode, &_segVideo1, &_segVideo2 };
-			for (int i = 0; i < 4; ++i) {
-				const int num = _memListParts[ptrId - 16000][i];
-				if (num != 0) {
-					if (_dataType == DT_20TH_EDITION && 0) {
-						// HD assets
-						_nth->preloadDat(ptrId - 16000, i, num);
-					}
-					*segments[i] = loadDat(num);
-				}
-			}
-			_currentPart = ptrId;
-		} else {
-			error("Resource::setupPart() ec=0x%X invalid part", 0xF07);
-		}
-		_scriptBakPtr = _scriptCurPtr;
-		break;
-	case DT_AMIGA:
-	case DT_ATARI:
-	case DT_ATARI_DEMO:
-	case DT_DOS:
-		if (ptrId != _currentPart) {
-			uint8_t ipal = 0;
-			uint8_t icod = 0;
-			uint8_t ivd1 = 0;
-			uint8_t ivd2 = 0;
-			if (ptrId >= 16000 && ptrId <= 16009) {
-				uint16_t part = ptrId - 16000;
-				ipal = _memListParts[part][0];
-				icod = _memListParts[part][1];
-				ivd1 = _memListParts[part][2];
-				ivd2 = _memListParts[part][3];
-			} else {
-				error("Resource::setupPart() ec=0x%X invalid part", 0xF07);
-			}
-			invalidateAll();
-			_memList[ipal].status = STATUS_TOLOAD;
-			_memList[icod].status = STATUS_TOLOAD;
-			_memList[ivd1].status = STATUS_TOLOAD;
-			if (ivd2 != 0) {
-				_memList[ivd2].status = STATUS_TOLOAD;
-			}
-			load();
-			_segVideoPal = _memList[ipal].bufPtr;
-			_segCode = _memList[icod].bufPtr;
-			_segVideo1 = _memList[ivd1].bufPtr;
-			if (ivd2 != 0) {
-				_segVideo2 = _memList[ivd2].bufPtr;
-			}
-			_currentPart = ptrId;
-		}
-		_scriptBakPtr = _scriptCurPtr;
-		break;
-	}
+    if (ptrId != _currentPart) {
+        uint8_t ipal = 0;
+        uint8_t icod = 0;
+        uint8_t ivd1 = 0;
+        uint8_t ivd2 = 0;
+        if (ptrId >= 16000 && ptrId <= 16009) {
+            uint16_t part = ptrId - 16000;
+            ipal = _memListParts[part][0];
+            icod = _memListParts[part][1];
+            ivd1 = _memListParts[part][2];
+            ivd2 = _memListParts[part][3];
+        } else {
+            error("Resource::setupPart() ec=0x%X invalid part", 0xF07);
+        }
+        invalidateAll();
+        _memList[ipal].status = STATUS_TOLOAD;
+        _memList[icod].status = STATUS_TOLOAD;
+        _memList[ivd1].status = STATUS_TOLOAD;
+        if (ivd2 != 0) {
+            _memList[ivd2].status = STATUS_TOLOAD;
+        }
+        load();
+        _segVideoPal = _memList[ipal].bufPtr;
+        _segCode = _memList[icod].bufPtr;
+        _segVideo1 = _memList[ivd1].bufPtr;
+        if (ivd2 != 0) {
+            _segVideo2 = _memList[ivd2].bufPtr;
+        }
+        _currentPart = ptrId;
+    }
+    _scriptBakPtr = _scriptCurPtr;
 }
 
 void Resource::allocMemBlock() {

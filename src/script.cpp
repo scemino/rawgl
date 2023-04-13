@@ -23,25 +23,6 @@ void Script::init() {
 	memset(_scriptVars, 0, sizeof(_scriptVars));
 	_fastMode = false;
 	_ply->_syncVar = &_scriptVars[VAR_MUSIC_SYNC];
-	_scriptPtr.byteSwap = _is3DO = (_res->getDataType() == Resource::DT_3DO);
-	if (_is3DO) {
-		_scriptVars[0xDB] = 1;
-		_scriptVars[0xE2] = 1;
-		_scriptVars[0xF2] = 6000;
-	} else if (_res->getDataType() != Resource::DT_15TH_EDITION && _res->getDataType() != Resource::DT_20TH_EDITION) {
-		_scriptVars[VAR_RANDOM_SEED] = time(0);
-#ifdef BYPASS_PROTECTION
-		// these 3 variables are set by the game code
-		_scriptVars[0xBC] = 0x10;
-		_scriptVars[0xC6] = 0x80;
-		_scriptVars[0xF2] = (_res->getDataType() == Resource::DT_AMIGA || _res->getDataType() == Resource::DT_ATARI) ? 6000 : 4000;
-		// these 2 variables are set by the engine executable
-		_scriptVars[0xDC] = 33;
-#endif
-		if (_res->getDataType() == Resource::DT_DOS || _res->getDataType() == Resource::DT_WIN31) {
-			_scriptVars[0xE4] = 20;
-		}
-	}
 }
 
 void Script::op_movConst() {
@@ -197,7 +178,7 @@ void Script::op_condJmp() {
 	}
 	if (expr) {
 		op_jmp();
-		if (!_is3DO && var == VAR_SCREEN_NUM && _screenNum != _scriptVars[VAR_SCREEN_NUM]) {
+		if (var == VAR_SCREEN_NUM && _screenNum != _scriptVars[VAR_SCREEN_NUM]) {
 			fixUpPalette_changeScreen(_res->_currentPart, _scriptVars[VAR_SCREEN_NUM]);
 			_screenNum = _scriptVars[VAR_SCREEN_NUM];
 		}
@@ -276,7 +257,7 @@ void Script::op_updateDisplay() {
 	}
 #endif
 
-	const int frameHz = _is3DO ? 60 : 50;
+	const int frameHz = 50;
 	if (!_fastMode && _scriptVars[VAR_PAUSE_SLICES] != 0) {
 		const int delay = _stub->getTimeStamp() - _timeStamp;
 		const int pause = _scriptVars[VAR_PAUSE_SLICES] * 1000 / frameHz - delay;
@@ -285,11 +266,7 @@ void Script::op_updateDisplay() {
 		}
 	}
 	_timeStamp = _stub->getTimeStamp();
-	if (_is3DO) {
-		_scriptVars[0xF7] = (_timeStamp - _startTime) * frameHz / 1000;
-	} else {
-		_scriptVars[0xF7] = 0;
-	}
+	_scriptVars[0xF7] = 0;
 
 	_vid->_displayHead = !((_res->_currentPart == 16004 && _screenNum == 37) || (_res->_currentPart == 16006 && _screenNum == 202));
 	_vid->updateDisplay(page, _stub);
@@ -381,11 +358,6 @@ void Script::op_playMusic() {
 void Script::restartAt(int part, int pos) {
 	_ply->stop();
 	_mix->stopAll();
-	if (_res->getDataType() == Resource::DT_20TH_EDITION) {
-		_scriptVars[0xBF] = _difficulty; // difficulty (0 to 2)
-		// _scriptVars[0xDB] = 1; // preload sounds (resnum >= 2000)
-		_scriptVars[0xDE] = _useRemasteredAudio ? 1 : 0; // playback remastered sounds (resnum >= 146)
-	}
 	if (_res->getDataType() == Resource::DT_DOS && part == kPartCopyProtection) {
 		// VAR(0x54) indicates if the "Out of this World" title screen should be presented
 		//
@@ -465,11 +437,7 @@ void Script::executeTask() {
 			}
 			debug(DBG_VIDEO, "vid_opcd_0x80 : opcode=0x%X off=0x%X x=%d y=%d", opcode, off, pt.x, pt.y);
 			_vid->setDataBuffer(_res->_segVideo1, off);
-			if (_is3DO) {
-				_vid->drawShape3DO(0xFF, 64, &pt);
-			} else {
-				_vid->drawShape(0xFF, 64, &pt);
-			}
+			_vid->drawShape(0xFF, 64, &pt);
 		} else if (opcode & 0x40) {
 			Point pt;
 			const uint8_t offsetHi = _scriptPtr.fetchByte();
@@ -509,74 +477,8 @@ void Script::executeTask() {
 			}
 			debug(DBG_VIDEO, "vid_opcd_0x40 : off=0x%X x=%d y=%d", off, pt.x, pt.y);
 			_vid->setDataBuffer(_res->_useSegVideo2 ? _res->_segVideo2 : _res->_segVideo1, off);
-			if (_is3DO) {
-				_vid->drawShape3DO(0xFF, zoom, &pt);
-			} else {
-				_vid->drawShape(0xFF, zoom, &pt);
-			}
+			_vid->drawShape(0xFF, zoom, &pt);
 		} else {
-			if (_is3DO) {
-				switch (opcode) {
-				case 11: {
-						const int num = _scriptPtr.fetchByte();
-						debug(DBG_SCRIPT, "Script::op11() setPalette %d", num);
-						_vid->changePal(num);
-					}
-					continue;
-				case 22: {
-						const int var = _scriptPtr.fetchByte();
-						const int shift = _scriptPtr.fetchByte();
-						debug(DBG_SCRIPT, "Script::op22() VAR(0x%02X) <<= %d", var, shift);
-						_scriptVars[var] = (uint16_t)_scriptVars[var] << shift;
-					}
-					continue;
-				case 23: {
-						const int var = _scriptPtr.fetchByte();
-						const int shift  = _scriptPtr.fetchByte();
-						debug(DBG_SCRIPT, "Script::op23() VAR(0x%02X) >>= %d", var, shift);
-						_scriptVars[var] = (uint16_t)_scriptVars[var] >> shift;
-					}
-					continue;
-				case 26: {
-						const int num = _scriptPtr.fetchByte();
-						debug(DBG_SCRIPT, "Script::op26() playMusic %d", num);
-						snd_playMusic(num, 0, 0);
-					}
-					continue;
-				case 27: {
-						const int num = _scriptPtr.fetchWord();
-						const int x = _scriptVars[_scriptPtr.fetchByte()];
-						const int y = _scriptVars[_scriptPtr.fetchByte()];
-						const int color = _scriptPtr.fetchByte();
-						_vid->drawString(color, x, y, num);
-					}
-					continue;
-				case 28: {
-						const uint8_t var = _scriptPtr.fetchByte();
-						debug(DBG_SCRIPT, "Script::op28() jmpIf(VAR(0x%02X) == 0)");
-						if (_scriptVars[var] == 0) {
-							op_jmp();
-						} else {
-							_scriptPtr.fetchWord();
-						}
-					}
-					continue;
-				case 29: {
-						const uint8_t var = _scriptPtr.fetchByte();
-						debug(DBG_SCRIPT, "Script::op29() jmpIf(VAR(0x%02X) != 0)");
-						if (_scriptVars[var] != 0) {
-							op_jmp();
-						} else {
-							_scriptPtr.fetchWord();
-						}
-					}
-					continue;
-				case 30: {
-						fprintf(stdout, "Time = %d", _scriptVars[0xF7]);
-					}
-					continue;
-				}
-			}
 			if (opcode > 0x1A) {
 				error("Script::executeTask() ec=0x%X invalid opcode=0x%X", 0xFFF, opcode);
 			} else {
@@ -611,20 +513,10 @@ void Script::updateInput() {
 		ud = jd = 1;
 		m |= 4; // crouch
 	}
-	if (_is3DO) { // This could be enabled to any later version than Amiga, Atari and DOS demo
-		if (_stub->_pi.dirMask & PlayerInput::DIR_UP) {
-			ud = -1;
-		}
-		if (_stub->_pi.jump) {
-			jd = -1;
-			m |= 8; // jump
-		}
-	} else {
-		if (_stub->_pi.dirMask & PlayerInput::DIR_UP) {
-			ud = jd = -1;
-			m |= 8; // jump
-		}
-	}
+    if (_stub->_pi.dirMask & PlayerInput::DIR_UP) {
+        ud = jd = -1;
+        m |= 8; // jump
+    }
 	if (!(_res->getDataType() == Resource::DT_AMIGA || _res->getDataType() == Resource::DT_ATARI)) {
 		_scriptVars[VAR_HERO_POS_UP_DOWN] = ud;
 	}
@@ -666,9 +558,6 @@ void Script::inp_handleSpecialKeys() {
 	if (_stub->_pi.pause) {
 		if (_res->_currentPart != kPartCopyProtection && _res->_currentPart != kPartIntro) {
 			_stub->_pi.pause = false;
-			if (_is3DO) {
-				_vid->drawBitmap3DO("PauseShape", _stub);
-			}
 			while (!_stub->_pi.pause && !_stub->_pi.quit) {
 				_stub->processEvents();
 				_stub->sleep(50);
@@ -678,37 +567,7 @@ void Script::inp_handleSpecialKeys() {
 	}
 	if (_stub->_pi.back) {
 		_stub->_pi.back = false;
-		if (_is3DO) {
-			static const char *names[] = { "EndShape1", "EndShape2" };
-			int current = 0;
-			_vid->drawBitmap3DO(names[current], _stub);
-			while (!_stub->_pi.quit) {
-				_stub->processEvents();
-				_stub->sleep(50);
-				if (_stub->_pi.dirMask & PlayerInput::DIR_LEFT) {
-					_stub->_pi.dirMask &= ~PlayerInput::DIR_LEFT;
-					if (current != 0) {
-						current = 0;
-						_vid->drawBitmap3DO(names[current], _stub);
-					}
-				}
-				if (_stub->_pi.dirMask & PlayerInput::DIR_RIGHT) {
-					_stub->_pi.dirMask &= ~PlayerInput::DIR_RIGHT;
-					if (current != 1) {
-						current = 1;
-						_vid->drawBitmap3DO(names[current], _stub);
-					}
-				}
-				if (_stub->_pi.action) {
-					_stub->_pi.action = false;
-					if (current == 0) {
-						_res->_nextPart = 16000;
-					}
-					break;
-				}
-			}
-		}
-	}
+    }
 	if (_stub->_pi.code) {
 		_stub->_pi.code = false;
 		if (_res->_hasPasswordScreen) {
@@ -754,31 +613,6 @@ void Script::snd_playSound(uint16_t resNum, uint8_t freq, uint8_t vol, uint8_t c
 	}
 	channel &= 3;
 	switch (_res->getDataType()) {
-	case Resource::DT_20TH_EDITION:
-		if (freq != 0) {
-			--freq;
-		}
-		/* fall-through */
-	case Resource::DT_15TH_EDITION:
-		if (freq >= 32) {
-			// Anniversary editions do not have the 170 period
-			//
-			//  [31] dos=19886 20th=19886 amiga=19886 (period 180)
-			//  [32] dos=21056 20th=22372 amiga=21056 (period 170)
-			//  [33] dos=22372 20th=23704 amiga=22372 (period 160)
-			++freq;
-		}
-		/* fall-through */
-	case Resource::DT_WIN31: {
-			uint8_t *buf = _res->loadWav(resNum);
-			if (buf) {
-				_mix->playSoundWav(channel, buf, getSoundFreq(freq), vol, getWavLooping(resNum));
-			}
-		}
-		break;
-	case Resource::DT_3DO:
-		_mix->playSoundAiff(channel, resNum, vol);
-		break;
 	case Resource::DT_AMIGA:
 	case Resource::DT_ATARI:
 	case Resource::DT_ATARI_DEMO:
@@ -795,56 +629,19 @@ void Script::snd_playSound(uint16_t resNum, uint8_t freq, uint8_t vol, uint8_t c
 void Script::snd_playMusic(uint16_t resNum, uint16_t delay, uint8_t pos) {
 	debug(DBG_SND, "snd_playMusic(0x%X, %d, %d)", resNum, delay, pos);
 	uint8_t loop = 0;
-	switch (_res->getDataType()) {
-	case Resource::DT_20TH_EDITION:
-		if (resNum == 5000) {
-			_mix->stopMusic();
-			break;
-		}
-		if (resNum >= 5001 && resNum <= 5010) {
-			loop = 1;
-		}
-		/* fall-through */
-	case Resource::DT_15TH_EDITION:
-	case Resource::DT_WIN31:
-		if (resNum != 0) {
-			char path[MAXPATHLEN];
-			const char *p = _res->getMusicPath(resNum, path, sizeof(path));
-			if (p) {
-				_mix->playMusic(p, loop);
-			}
-		}
-		break;
-	case Resource::DT_3DO:
-		if (resNum == 0) {
-			_mix->stopAifcMusic();
-		} else {
-			uint32_t offset = 0;
-			char path[MAXPATHLEN];
-			const char *p = _res->getMusicPath(resNum, path, sizeof(path), &offset);
-			if (p) {
-				_mix->playAifcMusic(p, offset);
-			}
-		}
-		break;
-	default: // DT_AMIGA, DT_ATARI, DT_DOS
-		if (resNum != 0) {
-			_ply->loadSfxModule(resNum, delay, pos);
-			_ply->start();
-			_mix->playSfxMusic(resNum);
-		} else if (delay != 0) {
-			_ply->setEventsDelay(delay);
-		} else {
-			_mix->stopSfxMusic();
-		}
-		break;
-	}
+	// DT_AMIGA, DT_ATARI, DT_DOS
+    if (resNum != 0) {
+        _ply->loadSfxModule(resNum, delay, pos);
+        _ply->start();
+        _mix->playSfxMusic(resNum);
+    } else if (delay != 0) {
+        _ply->setEventsDelay(delay);
+    } else {
+        _mix->stopSfxMusic();
+    }
 }
 
 void Script::snd_preloadSound(uint16_t resNum, const uint8_t *data) {
-	if (_res->getDataType() == Resource::DT_3DO) {
-		_mix->preloadSoundAiff(resNum, data);
-	}
 }
 
 void Script::fixUpPalette_changeScreen(int part, int screen) {

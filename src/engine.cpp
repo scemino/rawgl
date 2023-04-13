@@ -73,9 +73,7 @@ void Engine::setup(Language lang, int graphicsType, const char *scalerName, int 
 	_vid._graphics = _graphics;
 	int w = GFX_W * scalerFactor;
 	int h = GFX_H * scalerFactor;
-	if (_res.getDataType() != Resource::DT_3DO) {
-		_vid._graphics->_fixUpPalette = FIXUP_PALETTE_REDRAW;
-	}
+	_vid._graphics->_fixUpPalette = FIXUP_PALETTE_REDRAW;
 	_vid.init();
 	if (scalerFactor > 1) {
 		_vid.setScaler(scalerName, scalerFactor);
@@ -84,18 +82,8 @@ void Engine::setup(Language lang, int graphicsType, const char *scalerName, int 
 	_res.allocMemBlock();
 	_res.readEntries();
 	_res.dumpEntries();
-	const bool isNth = !Graphics::_is1991 && (_res.getDataType() == Resource::DT_15TH_EDITION || _res.getDataType() == Resource::DT_20TH_EDITION);
-	if (isNth) {
-		// get HD background bitmaps resolution
-		_res._nth->getBitmapSize(&w, &h);
-	}
 	_graphics->init(w, h);
-	if (isNth) {
-		_res.loadFont();
-		_res.loadHeads();
-	} else {
-		_vid.setDefaultFont();
-	}
+	_vid.setDefaultFont();
 	_script.init();
 	MixerType mixerType = kMixerTypeRaw;
 	switch (_res.getDataType()) {

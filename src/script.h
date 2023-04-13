@@ -64,7 +64,6 @@ struct Script {
 	bool _scriptPaused;
 	bool _fastMode;
 	int _screenNum;
-	bool _is3DO;
 	uint32_t _startTime, _timeStamp;
 
 	Script(Mixer *mix, Resource *res, SfxPlayer *ply, Video *vid);

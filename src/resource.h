@@ -82,10 +82,6 @@ struct Resource {
 		DT_DOS,
 		DT_AMIGA,
 		DT_ATARI,
-		DT_15TH_EDITION,
-		DT_20TH_EDITION,
-		DT_WIN31,
-		DT_3DO,
 		DT_ATARI_DEMO, // ST Action Issue44 Disk28
 	};
 
@@ -120,9 +116,6 @@ struct Resource {
 	const char *_bankPrefix;
 	bool _hasPasswordScreen;
 	DataType _dataType;
-	ResourceNth *_nth;
-	ResourceWin31 *_win31;
-	Resource3do *_3do;
 	Language _lang;
 	const AmigaMemEntry *_amigaMemList;
 	DemoJoy _demo3Joy;
@@ -139,15 +132,8 @@ struct Resource {
 	void dumpEntries();
 	void load();
 	void invalidateAll();
-	void invalidateRes();	
+	void invalidateRes();
 	void update(uint16_t num, PreloadSoundProc, void *);
-	void loadBmp(int num);
-	uint8_t *loadDat(int num);
-	void loadFont();
-	void loadHeads();
-	uint8_t *loadWav(int num);
-	const char *getString(int num);
-	const char *getMusicPath(int num, char *buf, int bufSize, uint32_t *offset = 0);
 	void setupPart(int part);
 	void allocMemBlock();
 	void freeMemBlock();

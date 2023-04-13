@@ -29,9 +29,6 @@ static const int _restartPos[36 * 2] = {
 };
 
 enum {
-    kStateLogo3DO,
-    kStateTitle3DO,
-    kStateEnd3DO,
     kStateGame
 };
 
@@ -131,14 +128,6 @@ void game_init(game_t* game, const game_desc_t* desc) {
             break;
         }
         break;
-    case Resource::DT_WIN31:
-    case Resource::DT_15TH_EDITION:
-    case Resource::DT_20TH_EDITION:
-        mixerType = kMixerTypeWav;
-        break;
-    case Resource::DT_3DO:
-        mixerType = kMixerTypeAiff;
-        break;
     }
     _state->_mix.callback = desc->audio.callback;
     _state->_mix.init(mixerType);
@@ -161,17 +150,13 @@ void game_init(game_t* game, const game_desc_t* desc) {
             break;
         }
 #endif
-	if (_state->_res.getDataType() == Resource::DT_3DO && _state->_part_num == kPartIntro) {
-		_state->_state = kStateLogo3DO;
-	} else {
-		_state->_state = kStateGame;
-		const int num = _state->_part_num;
-		if (num < 36) {
-			_state->_script.restartAt(_restartPos[num * 2], _restartPos[num * 2 + 1]);
-		} else {
-			_state->_script.restartAt(num);
-		}
-	}
+    _state->_state = kStateGame;
+    const int num = _state->_part_num;
+    if (num < 36) {
+        _state->_script.restartAt(_restartPos[num * 2], _restartPos[num * 2 + 1]);
+    } else {
+        _state->_script.restartAt(num);
+    }
     game->title = _state->_res.getGameTitle(lang);
 }
 
@@ -194,16 +179,6 @@ void _game_exec(game_t* game, uint32_t ms) {
     if (num_frames > 0) {
         const int num_samples = num_frames * saudio_channels();
         _state->_mix.update(num_samples);
-    }
-    if (_state->_res.getDataType() == Resource::DT_3DO) {
-        switch (_state->_res._nextPart) {
-        case 16009:
-            _state->_state = kStateEnd3DO;
-            break;
-        case 16000:
-            _state->_state = kStateTitle3DO;
-            break;
-        }
     }
 
     _state->_sys._sleep += 16;

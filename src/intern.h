@@ -37,7 +37,7 @@ inline T MAX(T v1, T v2) {
 
 template<typename T>
 inline void SWAP(T &a, T &b) {
-	T tmp = a; 
+	T tmp = a;
 	a = b;
 	b = tmp;
 }
@@ -96,14 +96,13 @@ enum {
 
 struct Ptr {
 	uint8_t *pc;
-	bool byteSwap;
-	
+
 	uint8_t fetchByte() {
 		return *pc++;
 	}
-	
+
 	uint16_t fetchWord() {
-		const uint16_t i = byteSwap ? READ_LE_UINT16(pc) : READ_BE_UINT16(pc);
+		const uint16_t i = READ_BE_UINT16(pc);
 		pc += 2;
 		return i;
 	}
@@ -126,7 +125,7 @@ struct QuadStrip {
 	enum {
 		MAX_VERTICES = 70
 	};
-	
+
 	uint8_t numVertices;
 	Point vertices[MAX_VERTICES];
 };
