@@ -57,6 +57,9 @@ typedef struct {
     int w, h;
     bool open;
     game_mem_entry_t* res;
+    void* tex_bmp;
+    uint8_t buf[320*200*4];
+    int selected;
 } ui_game_res_t;
 
 typedef struct {
@@ -192,7 +195,7 @@ static void _ui_game_draw_script(ui_game_t* ui) {
                 s = "VAR_PAUSE_SLICES";
                 break;
                 default:
-                sprintf(tmp, "VAR%u", i);
+                snprintf(tmp, 16, "VAR%u", i);
                 s = tmp;
                 break;
             }
@@ -200,6 +203,121 @@ static void _ui_game_draw_script(ui_game_t* ui) {
         }
     }
     ImGui::End();
+}
+
+static char* _convert_size(int size, char* str, size_t len) {
+    static const char* suffix[] = {"B", "KB", "MB", "GB", "TB"};
+    int s = size;
+    float dblBytes = (float)size;
+    int i = 0;
+    if (s > 1024) {
+        while ((s / 1024) > 0 && (i < 5)) {
+            dblBytes = ((float)s) / 1024.f;
+            s = s / 1024;
+            i++;
+        }
+    }
+    snprintf(str, len, "%.2f %s", dblBytes, suffix[i]);
+    return str;
+}
+
+inline uint16_t _read_be_uint16(const void *ptr) {
+	const uint8_t *b = (const uint8_t *)ptr;
+	return (b[0] << 8) | b[1];
+}
+
+static void decode_amiga(const uint8_t *src, uint32_t *dst, uint32_t pal[16]) {
+	static const int plane_size = 200 * 320 / 8;
+	for (int y = 0; y < 200; ++y) {
+		for (int x = 0; x < 320; x += 8) {
+			for (int b = 0; b < 8; ++b) {
+				const int mask = 1 << (7 - b);
+				uint8_t color = 0;
+				for (int p = 0; p < 4; ++p) {
+					if (src[p * plane_size] & mask) {
+						color |= 1 << p;
+					}
+				}
+				*dst++ = pal[color];
+			}
+			++src;
+		}
+	}
+}
+
+static void _ui_game_get_pal(ui_game_t* ui, int res_id, int id, uint32_t pal[16]) {
+    game_get_res_buf(res_id, ui->res.buf);
+    const uint8_t *p = ui->res.buf + id * 16 * sizeof(uint16_t);
+    for (int i = 0; i < 16; ++i) {
+        const uint16_t color = _read_be_uint16(p); p += 2;
+        uint8_t r = (color >> 8) & 0xF;
+        uint8_t g = (color >> 4) & 0xF;
+        uint8_t b =  color       & 0xF;
+        r = (r << 4) | r;
+        g = (g << 4) | g;
+        b = (b << 4) | b;
+        ImColor c = ImColor(r, g, b);
+        pal[i] = (ImU32)c;
+    }
+}
+
+static void _ui_game_get_pal_for_res(ui_game_t* ui, int res_id, uint32_t pal[16]) {
+    static uint8_t _res[] = {
+        0x12, 0x14, 4,
+        0x13, 0x14, 8,
+        0x43, 0x17, 3,
+        0x44, 0x20, 8,
+        0x45, 0x20, 8,
+        0x46, 0x20, 8,
+        0x47, 0x14, 2,
+        0x48, 0x7d, 7,
+        0x49, 0x7d, 7,
+        0x53, 0x7d, 7,
+        0x90, 0x26, 3,
+        0x91, 0x26, 1
+    };
+
+    for(int i=0; i<12; i++) {
+        if(_res[i*3] == res_id) {
+            _ui_game_get_pal(ui, _res[i*3+1], _res[i*3+2], pal);
+        }
+    }
+}
+
+static void _ui_game_draw_sel_res(ui_game_t* ui) {
+    game_mem_entry_t* e = &ui->res.res[ui->res.selected];
+    if(e->type == Resource::RT_PALETTE) {
+        game_get_res_buf(ui->res.selected, ui->res.buf);
+        for (int num = 0; num < 32; ++num) {
+            const uint8_t *p = ui->res.buf + num * 16 * sizeof(uint16_t);
+            for (int i = 0; i < 16; ++i) {
+                const uint16_t color = _read_be_uint16(p); p += 2;
+                uint8_t r = (color >> 8) & 0xF;
+                uint8_t g = (color >> 4) & 0xF;
+                uint8_t b =  color       & 0xF;
+                r = (r << 4) | r;
+                g = (g << 4) | g;
+                b = (b << 4) | b;
+                ImColor c = ImColor(r, g, b);
+                ImGui::PushID(i);
+                ImGui::ColorEdit3("##pal_color", &c.Value.x, ImGuiColorEditFlags_NoInputs);
+                ImGui::SameLine();
+                ImGui::PopID();
+            }
+            ImGui::NewLine();
+        }
+    } else if(e->type == Resource::RT_BITMAP) {
+        uint32_t pal[16];
+        uint8_t buffer[320*200/2];
+        _ui_game_get_pal_for_res(ui, ui->res.selected, pal);
+        if(game_get_res_buf(ui->res.selected, buffer)) {
+            decode_amiga(buffer, (uint32_t*)ui->res.buf, pal);
+            ui->video.texture_cbs.update_cb(ui->res.tex_bmp, ui->res.buf, 320*200*sizeof(uint32_t));
+            ImGui::Image(ui->res.tex_bmp, ImVec2(320, 200));
+        } else {
+            ImGui::Text("Not available");
+        }
+    }
 }
 
 static void _ui_game_draw_resources(ui_game_t* ui) {
@@ -210,21 +328,27 @@ static void _ui_game_draw_resources(ui_game_t* ui) {
     ImGui::SetNextWindowSize(ImVec2((float)ui->res.w, (float)ui->res.h), ImGuiCond_Once);
     if (ImGui::Begin("Resources", &ui->res.open)) {
 
-        if (ImGui::BeginTable("##resources", 6, ImGuiTableFlags_Resizable|ImGuiTableFlags_Sortable)) {
-
+        if (ImGui::BeginTable("##resources", 6, ImGuiTableFlags_Resizable | ImGuiTableFlags_NoSavedSettings)) {
+            ImGui::TableSetupColumn("#");
             ImGui::TableSetupColumn("Type");
-            ImGui::TableSetupColumn("Status");
-            ImGui::TableSetupColumn("Rank");
             ImGui::TableSetupColumn("Bank");
             ImGui::TableSetupColumn("Packed Size");
             ImGui::TableSetupColumn("Size");
             ImGui::TableHeadersRow();
 
             for(int i=0; i<GAME_ENTRIES_COUNT_20TH; i++) {
-                ImGui::TableNextRow();
-                ImGui::TableNextColumn();
                 game_mem_entry_t* e = &ui->res.res[i];
                 if(e->status == 0xFF) break;
+
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::PushID(i);
+                char status_text[256];
+                snprintf(status_text, 256, "%02X", i);
+                if(ImGui::Selectable(status_text, ui->res.selected == i, ImGuiSelectableFlags_SpanAllColumns)) {
+                    ui->res.selected = i;
+                }
+                ImGui::TableNextColumn();
                 Resource::ResType t = (Resource::ResType)e->type;
                 switch(t) {
                     case Resource::RT_SOUND: ImGui::Text("Sound"); break;
@@ -235,19 +359,17 @@ static void _ui_game_draw_resources(ui_game_t* ui) {
                     case Resource::RT_SHAPE: ImGui::Text("Shape"); break;
                     case Resource::RT_BANK: ImGui::Text("Bank"); break;
                 }
+
                 ImGui::TableNextColumn();
-                ImGui::Text("%u", e->status);
-                ImGui::TableNextColumn();
-                ImGui::Text("%u", e->rankNum);
-                ImGui::TableNextColumn();
-                ImGui::Text("%u", e->bankNum);
-                ImGui::TableNextColumn();
-                ImGui::Text("%u", e->packedSize);
-                ImGui::TableNextColumn();
-                ImGui::Text("%u", e->unpackedSize);
+                ImGui::Text("%02X", e->bankNum); ImGui::TableNextColumn();
+                ImGui::Text("%s", _convert_size(e->packedSize, status_text, 256)); ImGui::TableNextColumn();
+                ImGui::Text("%s", _convert_size(e->unpackedSize, status_text, 256));
+                ImGui::PopID();
             }
             ImGui::EndTable();
         }
+        ImGui::Separator();
+        _ui_game_draw_sel_res(ui);
     }
     ImGui::End();
 }
@@ -298,7 +420,7 @@ void ui_game_init(ui_game_t* ui, const ui_game_desc_t* ui_desc) {
     GAME_ASSERT(ui && ui_desc);
     GAME_ASSERT(ui_desc->game);
     ui->game = ui_desc->game;
-     {
+    {
         ui_dbg_desc_t desc = {0};
         desc.title = "CPU Debugger";
         desc.x = 10;
@@ -348,10 +470,12 @@ void ui_game_init(ui_game_t* ui, const ui_game_desc_t* ui_desc) {
             x += dx; y += dy;
         }
     }
+    ui->res.tex_bmp = ui->video.texture_cbs.create_cb(320, 200);
 }
 
 void ui_game_discard(ui_game_t* ui) {
     GAME_ASSERT(ui && ui->game);
+    ui->video.texture_cbs.destroy_cb(ui->res.tex_bmp);
     for(int i=0; i<4; i++) {
         ui->video.texture_cbs.destroy_cb(ui->video.tex_fb[i]);
     }

@@ -88,6 +88,7 @@ void game_char_pressed(game_t* game, int c);
 void game_get_resources(game_t* game, game_mem_entry_t** res);
 uint8_t* game_get_pc(game_t* game);
 void game_get_vars(game_t* game, int16_t** vars);
+bool game_get_res_buf(int id, uint8_t* dst);
 
 #ifdef __cplusplus
 } /* extern "C" */

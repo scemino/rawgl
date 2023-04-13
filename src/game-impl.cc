@@ -176,6 +176,7 @@ void game_init(game_t* game, const game_desc_t* desc) {
 }
 
 void _game_exec(game_t* game, uint32_t ms) {
+    (void)game;
     _state->_sys._elapsed += ms;
     if(_state->_sys._sleep) {
         if(ms > _state->_sys._sleep) {
@@ -293,20 +294,28 @@ void game_key_up(game_t* game, game_input_t input) {
 }
 
 void game_char_pressed(game_t* game, int c) {
+    (void)game;
     _state->_sys._pi.lastChar = (char)c;
 }
 
 void game_get_resources(game_t* game, game_mem_entry_t** res) {
-    //memcpy(res->mem_entries, _state->_res._memList, sizeof(_state->_res._memList));
+    (void)game;
     *res = (game_mem_entry_t*)&_state->_res._memList[0];
 }
 
 void game_get_vars(game_t* game, int16_t** vars) {
+    (void)game;
     *vars = &_state->_script._scriptVars[0];
 }
 
 uint8_t* game_get_pc(game_t* game) {
+    (void)game;
     return _state->_res._segCode;
+}
+
+bool game_get_res_buf(int id, uint8_t* dst) {
+    MemEntry* me = &_state->_res._memList[id];
+    return _state->_res.readBank(me, dst);
 }
 
 #ifdef __cplusplus
