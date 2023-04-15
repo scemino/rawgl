@@ -9,7 +9,6 @@
 #include "game.h"
 #define GAME_UI_IMPL
 #include "imgui.h"
-#include "resource.h"
 #include "ui/ui_util.h"
 #include "ui/raw-dasm.h"
 #include "ui/ui_dbg.h"

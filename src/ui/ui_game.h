@@ -245,7 +245,7 @@ static void decode_amiga(const uint8_t *src, uint32_t *dst, uint32_t pal[16]) {
 }
 
 static void _ui_game_get_pal(ui_game_t* ui, int res_id, int id, uint32_t pal[16]) {
-    game_get_res_buf(res_id, ui->res.buf);
+    game_get_res_buf(ui->game, res_id, ui->res.buf);
     const uint8_t *p = ui->res.buf + id * 16 * sizeof(uint16_t);
     for (int i = 0; i < 16; ++i) {
         const uint16_t color = _read_be_uint16(p); p += 2;
@@ -285,8 +285,8 @@ static void _ui_game_get_pal_for_res(ui_game_t* ui, int res_id, uint32_t pal[16]
 
 static void _ui_game_draw_sel_res(ui_game_t* ui) {
     game_mem_entry_t* e = &ui->res.res[ui->res.selected];
-    if(e->type == Resource::RT_PALETTE) {
-        game_get_res_buf(ui->res.selected, ui->res.buf);
+    if(e->type == RT_PALETTE) {
+        game_get_res_buf(ui->game, ui->res.selected, ui->res.buf);
         for (int num = 0; num < 32; ++num) {
             const uint8_t *p = ui->res.buf + num * 16 * sizeof(uint16_t);
             for (int i = 0; i < 16; ++i) {
@@ -305,11 +305,11 @@ static void _ui_game_draw_sel_res(ui_game_t* ui) {
             }
             ImGui::NewLine();
         }
-    } else if(e->type == Resource::RT_BITMAP) {
+    } else if(e->type == RT_BITMAP) {
         uint32_t pal[16];
         uint8_t buffer[320*200/2];
         _ui_game_get_pal_for_res(ui, ui->res.selected, pal);
-        if(game_get_res_buf(ui->res.selected, buffer)) {
+        if(game_get_res_buf(ui->game, ui->res.selected, buffer)) {
             decode_amiga(buffer, (uint32_t*)ui->res.buf, pal);
             ui->video.texture_cbs.update_cb(ui->res.tex_bmp, ui->res.buf, 320*200*sizeof(uint32_t));
             ImGui::Image(ui->res.tex_bmp, ImVec2(320, 200));
@@ -348,15 +348,15 @@ static void _ui_game_draw_resources(ui_game_t* ui) {
                     ui->res.selected = i;
                 }
                 ImGui::TableNextColumn();
-                Resource::ResType t = (Resource::ResType)e->type;
+                game_res_type_t t = (game_res_type_t)e->type;
                 switch(t) {
-                    case Resource::RT_SOUND: ImGui::Text("Sound"); break;
-                    case Resource::RT_MUSIC: ImGui::Text("Music"); break;
-                    case Resource::RT_BITMAP: ImGui::Text("Bitmap"); break;
-                    case Resource::RT_PALETTE: ImGui::Text("Palette"); break;
-                    case Resource::RT_BYTECODE: ImGui::Text("Byte code"); break;
-                    case Resource::RT_SHAPE: ImGui::Text("Shape"); break;
-                    case Resource::RT_BANK: ImGui::Text("Bank"); break;
+                    case RT_SOUND: ImGui::Text("Sound"); break;
+                    case RT_MUSIC: ImGui::Text("Music"); break;
+                    case RT_BITMAP: ImGui::Text("Bitmap"); break;
+                    case RT_PALETTE: ImGui::Text("Palette"); break;
+                    case RT_BYTECODE: ImGui::Text("Byte code"); break;
+                    case RT_SHAPE: ImGui::Text("Shape"); break;
+                    case RT_BANK: ImGui::Text("Bank"); break;
                 }
 
                 ImGui::TableNextColumn();
@@ -410,8 +410,8 @@ static void _ui_game_draw_video(ui_game_t* ui) {
 static uint8_t _ui_raw_mem_read(int layer, uint16_t addr, void* user_data) {
     GAME_ASSERT(user_data);
     (void)layer;
-    ui_game_t* ui = (ui_game_t*) user_data;
-    uint8_t* pc = game_get_pc(ui->game);
+    game_t* game = (game_t*) user_data;
+    uint8_t* pc = game_get_pc(game);
     return pc[addr];
 }
 

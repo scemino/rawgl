@@ -4,10 +4,16 @@
 extern "C" {
 #endif
 
+#define GAME_WIDTH                     (320)
+#define GAME_HEIGHT                    (200)
 #define GAME_DEFAULT_AUDIO_SAMPLE_RATE (44100)
-#define GAME_DEFAULT_AUDIO_SAMPLES (128)        // default number of samples in internal sample buffer
-#define GAME_MAX_AUDIO_SAMPLES (2048*16)        // max number of audio samples in internal sample buffer
-#define GAME_ENTRIES_COUNT_20TH (178)
+#define GAME_DEFAULT_AUDIO_SAMPLES  (128)        // default number of samples in internal sample buffer
+#define GAME_MAX_AUDIO_SAMPLES      (2048*16)        // max number of audio samples in internal sample buffer
+#define GAME_ENTRIES_COUNT_20TH     (178)
+#define GAME_MEM_BLOCK_SIZE         (1 * 1024 * 1024)
+#define GAME_RES_STATUS_NULL        (0)
+#define GAME_RES_STATUS_LOADED      (1)
+#define GAME_RES_STATUS_TOLOAD      (2)
 
 #define VAR_RANDOM_SEED          (0x3C)
 #define VAR_SCREEN_NUM           (0x67)
@@ -55,6 +61,23 @@ typedef enum  {
     GAME_INPUT_CODE,
     GAME_INPUT_PAUSE,
 } game_input_t;
+
+typedef enum {
+    RT_SOUND  = 0,
+    RT_MUSIC  = 1,
+    RT_BITMAP = 2, // full screen 4bpp video buffer, size=200*320/2
+    RT_PALETTE = 3, // palette (1024=vga + 1024=ega), size=2048
+    RT_BYTECODE = 4,
+    RT_SHAPE = 5,
+    RT_BANK = 6, // common part shapes (bank2.mat)
+} game_res_type_t;
+
+typedef enum {
+    DT_DOS,
+    DT_AMIGA,
+    DT_ATARI,
+    DT_ATARI_DEMO, // ST Action Issue44 Disk28
+} game_data_type_t;
 
 typedef struct {
 	uint8_t *data;
@@ -152,11 +175,33 @@ typedef struct {
 } game_audio_channel_t;
 
 typedef struct {
+	uint16_t    id;
+	const char* str;
+} game_str_entry_t;
+
+typedef struct {
+    game_mem_entry_t    mem_list[GAME_ENTRIES_COUNT_20TH];
+    uint16_t            num_mem_list;
+	uint8_t             mem[GAME_MEM_BLOCK_SIZE];
+	uint16_t            current_part, next_part;
+	uint8_t*            script_bak_ptr, *script_cur_ptr, *vid_cur_ptr;
+	bool                use_seg_video2;
+	uint8_t*            seg_video_pal;
+	uint8_t*            seg_code;
+	uint8_t*            seg_video1;
+	uint8_t*            seg_video2;
+	bool                has_password_screen;
+	game_data_type_t    data_type;
+	game_lang_t         lang;
+} game_res_t;
+
+typedef struct {
     bool            valid;
     game_debug_t    debug;
+    game_res_t      res;
 
     struct {
-        uint8_t             fb[320*200];    // frame buffer: this where is stored the image with indexed color
+        uint8_t             fb[GAME_WIDTH*GAME_HEIGHT];    // frame buffer: this where is stored the image with indexed color
         game_framebuffer_t  fbs[4];         // frame buffer: this where is stored the image with indexed color
         uint32_t            palette[16];    // palette containing 16 RGBA colors
     } gfx;
@@ -168,6 +213,16 @@ typedef struct {
         game_audio_sfx_player_t sfx_player;
         game_audio_callback_t   callback;
     } audio;
+
+    struct {
+        uint8_t                 next_pal, current_pal;
+        uint8_t                 buffers[3];
+        game_pc_t               p_data;
+        uint8_t*                data_buf;
+        const game_str_entry_t* strings_table;
+        bool                    use_ega;
+        uint8_t                 temp_bitmap[GAME_WIDTH * GAME_HEIGHT];
+    } video;
 
     struct {
         int16_t     vars[256];
@@ -194,7 +249,7 @@ void game_key_up(game_t* game, game_input_t input);
 void game_char_pressed(game_t* game, int c);
 void game_get_resources(game_t* game, game_mem_entry_t** res);
 uint8_t* game_get_pc(game_t* game);
-bool game_get_res_buf(int id, uint8_t* dst);
+bool game_get_res_buf(game_t* game, int id, uint8_t* dst);
 
 #ifdef __cplusplus
 } /* extern "C" */
