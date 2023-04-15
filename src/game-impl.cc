@@ -6,9 +6,7 @@
 #include "game.h"
 #include "graphics.h"
 #include "graphics_sokol.h"
-#include "mixer.h"
 #include "resource.h"
-#include "sfxplayer.h"
 #include "systemstub.h"
 #include "sokol_audio.h"
 #include "sokol_sys.h"
@@ -39,8 +37,6 @@ class GameState {
 public:
     Resource _res;
     Video _vid;
-    SfxPlayer _ply;
-    Mixer _mix;
     GraphicsSokol _graphics;
     SokolSystem _sys;
     int _part_num;
@@ -48,9 +44,7 @@ public:
 public:
     GameState(const char *dataDir):
     _res(&_vid, dataDir),
-    _vid(&_res),
-    _ply(&_res),
-    _mix(&_ply) {
+    _vid(&_res) {
     }
 };
 
@@ -79,6 +73,340 @@ uint16_t fetchWord(game_pc_t* ptr) {
     return i;
 }
 
+// Frac
+
+void frac_reset(game_frac_t* frac, int n, int d) {
+    frac->inc = (((int64_t)n) << FRAC_BITS) / d;
+    frac->offset = 0;
+}
+
+uint32_t frac_get_int(game_frac_t* frac) {
+    return frac->offset >> FRAC_BITS;
+}
+uint32_t frac_get_frac(game_frac_t* frac) {
+    return frac->offset & FRAC_MASK;
+}
+int frac_interpolate(game_frac_t* frac, int sample1, int sample2) {
+    const int fp = frac_get_frac(frac);
+    return (sample1 * (FRAC_MASK - fp) + sample2 * fp) >> FRAC_BITS;
+}
+
+// SFX Player
+
+static void _game_audio_sfx_set_events_delay(game_t* game, uint16_t delay) {
+	debug(DBG_SND, "SfxPlayer::setEventsDelay(%d)", delay);
+	game->audio.sfx_player.delay = delay;
+}
+
+static void _game_audio_sfx_prepare_instruments(game_t* game, const uint8_t* p) {
+    game_audio_sfx_player_t* player = &game->audio.sfx_player;
+    memset(player->sfx_mod.samples, 0, sizeof(player->sfx_mod.samples));
+	for (int i = 0; i < 15; ++i) {
+		game_audio_sfx_instrument_t *ins = &player->sfx_mod.samples[i];
+		uint16_t resNum = READ_BE_UINT16(p); p += 2;
+		if (resNum != 0) {
+			ins->volume = READ_BE_UINT16(p);
+			MemEntry *me = &_state->_res._memList[resNum];
+			if (me->status == Resource::STATUS_LOADED && me->type == Resource::RT_SOUND) {
+				ins->data = me->bufPtr;
+				debug(DBG_SND, "Loaded instrument 0x%X n=%d volume=%d", resNum, i, ins->volume);
+			} else {
+				error("Error loading instrument 0x%X", resNum);
+			}
+		}
+		p += 2; // skip volume
+	}
+}
+
+static void _game_audio_sfx_load_module(game_t* game, uint16_t resNum, uint16_t delay, uint8_t pos) {
+	debug(DBG_SND, "SfxPlayer::loadSfxModule(0x%X, %d, %d)", resNum, delay, pos);
+    game_audio_sfx_player_t* player = &game->audio.sfx_player;
+	MemEntry *me = &_state->_res._memList[resNum];
+	if (me->status == Resource::STATUS_LOADED && me->type == Resource::RT_MUSIC) {
+		memset(&player->sfx_mod, 0, sizeof(game_audio_sfx_module_t));
+		player->sfx_mod.cur_order = pos;
+		player->sfx_mod.num_order = me->bufPtr[0x3F];
+		debug(DBG_SND, "SfxPlayer::loadSfxModule() curOrder = 0x%X numOrder = 0x%X", player->sfx_mod.cur_order, player->sfx_mod.num_order);
+		player->sfx_mod.order_table = me->bufPtr + 0x40;
+		if (delay == 0) {
+			player->delay = READ_BE_UINT16(me->bufPtr);
+		} else {
+			player->delay = delay;
+		}
+		player->sfx_mod.data = me->bufPtr + 0xC0;
+		debug(DBG_SND, "SfxPlayer::loadSfxModule() eventDelay = %d ms", player->delay);
+		_game_audio_sfx_prepare_instruments(game, me->bufPtr + 2);
+	} else {
+		warning("SfxPlayer::loadSfxModule() ec=0x%X", 0xF8);
+	}
+}
+
+static void _game_audio_sfx_play(game_t* game, int rate) {
+    game_audio_sfx_player_t* player = &game->audio.sfx_player;
+	player->playing = true;
+	player->rate = rate;
+	player->samples_left = 0;
+	memset(player->channels, 0, sizeof(player->channels));
+}
+
+static int16_t _to_i16(int a) {
+	return ((a << 8) | a) - 32768;
+}
+
+static void _game_audio_sfx_mix_channel(int16_t* s, game_audio_sfx_channel_t* ch) {
+	if (ch->sample_len == 0) {
+		return;
+	}
+	int pos1 = ch->pos.offset >> Frac::BITS;
+	ch->pos.offset += ch->pos.inc;
+	int pos2 = pos1 + 1;
+	if (ch->sample_loop_len != 0) {
+		if (pos1 >= ch->sample_loop_pos + ch->sample_loop_len - 1) {
+			pos2 = ch->sample_loop_pos;
+			ch->pos.offset = pos2 << Frac::BITS;
+		}
+	} else {
+		if (pos1 >= ch->sample_len - 1) {
+			ch->sample_len = 0;
+			return;
+		}
+	}
+    int sample = frac_interpolate(&ch->pos, (int8_t)ch->sample_data[pos1], (int8_t)ch->sample_data[pos2]);
+	sample = *s + _to_i16(sample * ch->volume / 64);
+	*s = (sample < -32768 ? -32768 : (sample > 32767 ? 32767 : sample));
+}
+
+static void _game_audio_sfx_start(game_t* game) {
+	debug(DBG_SND, "SfxPlayer::start()");
+    game_audio_sfx_player_t* player = &game->audio.sfx_player;
+	player->sfx_mod.cur_pos = 0;
+}
+
+static void _game_audio_sfx_stop(game_t* game) {
+	debug(DBG_SND, "SfxPlayer::stop()");
+    game_audio_sfx_player_t* player = &game->audio.sfx_player;
+	player->playing = false;
+}
+
+static void _game_audio_sfx_handle_pattern(game_t* game, uint8_t channel, const uint8_t *data) {
+    game_audio_sfx_player_t* player = &game->audio.sfx_player;
+	game_audio_sfx_pattern_t pat;
+	memset(&pat, 0, sizeof(game_audio_sfx_pattern_t));
+	pat.note_1 = READ_BE_UINT16(data + 0);
+	pat.note_2 = READ_BE_UINT16(data + 2);
+	if (pat.note_1 != 0xFFFD) {
+		uint16_t sample = (pat.note_2 & 0xF000) >> 12;
+		if (sample != 0) {
+			uint8_t *ptr = player->sfx_mod.samples[sample - 1].data;
+			if (ptr != 0) {
+				debug(DBG_SND, "SfxPlayer::handlePattern() preparing sample %d", sample);
+				pat.sample_volume = player->sfx_mod.samples[sample - 1].volume;
+				pat.sample_start = 8;
+				pat.sample_buffer = ptr;
+				pat.sample_len = READ_BE_UINT16(ptr) * 2;
+				uint16_t loopLen = READ_BE_UINT16(ptr + 2) * 2;
+				if (loopLen != 0) {
+					pat.loop_pos = pat.sample_len;
+					pat.loop_len = loopLen;
+				} else {
+					pat.loop_pos = 0;
+					pat.loop_len = 0;
+				}
+				int16_t m = pat.sample_volume;
+				uint8_t effect = (pat.note_2 & 0x0F00) >> 8;
+				if (effect == 5) { // volume up
+					uint8_t volume = (pat.note_2 & 0xFF);
+					m += volume;
+					if (m > 0x3F) {
+						m = 0x3F;
+					}
+				} else if (effect == 6) { // volume down
+					uint8_t volume = (pat.note_2 & 0xFF);
+					m -= volume;
+					if (m < 0) {
+						m = 0;
+					}
+				}
+				player->channels[channel].volume = m;
+				pat.sample_volume = m;
+			}
+		}
+	}
+	if (pat.note_1 == 0xFFFD) {
+		debug(DBG_SND, "SfxPlayer::handlePattern() _syncVar = 0x%X", pat.note_2);
+		game->vm.vars[VAR_MUSIC_SYNC] = pat.note_2;
+	} else if (pat.note_1 == 0xFFFE) {
+		player->channels[channel].sample_len = 0;
+	} else if (pat.note_1 != 0 && pat.sample_buffer != 0) {
+		assert(pat.note_1 >= 0x37 && pat.note_1 < 0x1000);
+		// convert Amiga period value to hz
+		const int freq = kPaulaFreq / (pat.note_1 * 2);
+		debug(DBG_SND, "SfxPlayer::handlePattern() adding sample freq = 0x%X", freq);
+		game_audio_sfx_channel_t* ch = &player->channels[channel];
+		ch->sample_data = pat.sample_buffer + pat.sample_start;
+		ch->sample_len = pat.sample_len;
+		ch->sample_loop_pos = pat.loop_pos;
+		ch->sample_loop_len = pat.loop_len;
+		ch->volume = pat.sample_volume;
+		ch->pos.offset = 0;
+		ch->pos.inc = (freq << Frac::BITS) / player->rate;
+	}
+}
+
+static void _game_audio_sfx_handle_events(game_t* game) {
+    game_audio_sfx_player_t* player = &game->audio.sfx_player;
+	uint8_t order = player->sfx_mod.order_table[player->sfx_mod.cur_order];
+	const uint8_t *patternData = player->sfx_mod.data + player->sfx_mod.cur_pos + order * 1024;
+	for (uint8_t ch = 0; ch < 4; ++ch) {
+		_game_audio_sfx_handle_pattern(game, ch, patternData);
+		patternData += 4;
+	}
+	player->sfx_mod.cur_pos += 4 * 4;
+	debug(DBG_SND, "SfxPlayer::handleEvents() order = 0x%X curPos = 0x%X", order, player->sfx_mod.cur_pos);
+	if (player->sfx_mod.cur_pos >= 1024) {
+		player->sfx_mod.cur_pos = 0;
+		order = player->sfx_mod.cur_order + 1;
+		if (order == player->sfx_mod.num_order) {
+			player->playing = false;
+		}
+		player->sfx_mod.cur_order = order;
+	}
+}
+
+static void _game_audio_sfx_mix_samples(game_t* game, int16_t* buf, int len) {
+    game_audio_sfx_player_t* player = &game->audio.sfx_player;
+	while (len != 0) {
+		if (player->samples_left == 0) {
+            _game_audio_sfx_handle_events(game);
+			const int samplesPerTick = player->rate * (player->delay * 60 * 1000 / kPaulaFreq) / 1000;
+			player->samples_left = samplesPerTick;
+		}
+		int count = player->samples_left;
+		if (count > len) {
+			count = len;
+		}
+		player->samples_left -= count;
+		len -= count;
+		for (int i = 0; i < count; ++i) {
+            _game_audio_sfx_mix_channel(buf, &player->channels[0]);
+            _game_audio_sfx_mix_channel(buf, &player->channels[3]);
+			++buf;
+            _game_audio_sfx_mix_channel(buf, &player->channels[1]);
+            _game_audio_sfx_mix_channel(buf, &player->channels[2]);
+			++buf;
+		}
+	}
+}
+
+static void _game_audio_sfx_read_samples(game_t* game, int16_t *buf, int len) {
+    game_audio_sfx_player_t* player = &game->audio.sfx_player;
+	if (player->delay != 0) {
+		_game_audio_sfx_mix_samples(game, buf, len / 2);
+	}
+}
+
+// Audio
+
+static void _game_audio_stop_sound(game_t* game, uint8_t channel) {
+    game->audio.channels[channel].data = 0;
+}
+
+static void _game_audio_init_raw(game_audio_channel_t* chan, const uint8_t *data, int freq, int volume, int mixingFreq) {
+    chan->data = data + 8;
+    frac_reset(&chan->pos, freq, mixingFreq);
+
+    const int len = READ_BE_UINT16(data) * 2;
+    chan->loop_len = READ_BE_UINT16(data + 2) * 2;
+    chan->loop_pos = chan->loop_len ? len : 0;
+    chan->len = len;
+
+    chan->volume = volume;
+}
+
+static void _game_audio_play_sound_raw(game_t* game, uint8_t channel, const uint8_t *data, int freq, uint8_t volume) {
+    game_audio_channel_t* chan = &game->audio.channels[channel];
+    _game_audio_init_raw(chan, data, freq, volume, MIX_FREQ);
+}
+
+static void _game_play_sfx_music(game_t* game) {
+    _game_audio_sfx_play(game, MIX_FREQ);
+}
+
+static void _game_audio_stop_sfx_music(game_t* game) {
+    game->audio.sfx_player.playing = false;
+}
+
+static void _game_audio_stop_all(game_t* game) {
+    for (uint8_t i = 0; i < MIX_CHANNELS; ++i) {
+        _game_audio_stop_sound(game, i);
+    }
+    _game_audio_stop_sfx_music(game);
+}
+
+static void _game_audio_init(game_t* game, game_audio_callback_t callback) {
+    memset(game->audio.channels, 0, sizeof(game->audio.channels));
+    game->audio.callback = callback;
+}
+
+static const bool kAmigaStereoChannels = false;
+
+static int16_t mix_i16(int sample1, int sample2) {
+	const int sample = sample1 + sample2;
+	return sample < -32768 ? -32768 : ((sample > 32767 ? 32767 : sample));
+}
+
+void _game_audio_mix_raw(game_audio_channel_t* chan, int16_t* sample) {
+    if (chan->data) {
+        uint32_t pos = frac_get_int(&chan->pos);
+        chan->pos.offset += chan->pos.inc;
+        if (chan->loop_len != 0) {
+            if (pos >= chan->loop_pos + chan->loop_len) {
+                pos = chan->loop_pos;
+                chan->pos.offset = (chan->loop_pos << Frac::BITS) + chan->pos.inc;
+            }
+        } else {
+            if (pos >= chan->len) {
+                chan->data = 0;
+                return;
+            }
+        }
+        *sample = mix_i16(*sample, _to_i16(chan->data[pos] ^ 0x80) * chan->volume / 64);
+    }
+}
+
+static void _game_audio_mix_channels(game_t* game, int16_t *samples, int count) {
+    if (kAmigaStereoChannels) {
+     for (int i = 0; i < count; i += 2) {
+        _game_audio_mix_raw(&game->audio.channels[0], samples);
+        _game_audio_mix_raw(&game->audio.channels[3], samples);
+       ++samples;
+       _game_audio_mix_raw(&game->audio.channels[1], samples);
+       _game_audio_mix_raw(&game->audio.channels[2], samples);
+       ++samples;
+     }
+   } else {
+     for (int i = 0; i < count; i += 2) {
+       for (int j = 0; j < MIX_CHANNELS; ++j) {
+            _game_audio_mix_raw(&game->audio.channels[j], &samples[i]);
+       }
+       samples[i + 1] = samples[i];
+     }
+   }
+  }
+
+static void _game_audio_update(game_t* game, int num_samples) {
+    assert(num_samples < MIX_BUF_SIZE);
+    assert(num_samples < GAME_MAX_AUDIO_SAMPLES);
+    memset(game->audio.samples, 0, num_samples*sizeof(int16_t));
+    _game_audio_mix_channels(game, game->audio.samples, num_samples);
+    _game_audio_sfx_read_samples(game, (int16_t *)game->audio.samples, num_samples);
+    for (int i=0; i<num_samples; i++) {
+        game->audio.sample_buffer[i] = ((((float)game->audio.samples[i])+32768.f)/32768.f) - 1.0f;
+    }
+    game->audio.callback.func(game->audio.sample_buffer, num_samples, game->audio.callback.user_data);
+}
+
+// VM
 static void _op_mov_const(game_t* game) {
 	uint8_t i = fetchByte(&game->vm.ptr);
 	int16_t n = fetchWord(&game->vm.ptr);
@@ -107,7 +435,7 @@ static int _get_sound_freq(uint8_t period) {
 static void _snd_playSound(game_t* game, uint16_t resNum, uint8_t freq, uint8_t vol, uint8_t channel) {
 	debug(DBG_SND, "snd_playSound(0x%X, %d, %d, %d)", resNum, freq, vol, channel);
 	if (vol == 0) {
-		_state->_mix.stopSound(channel);
+		_game_audio_stop_sound(game, channel);
 		return;
 	}
 	if (vol > 63) {
@@ -124,7 +452,7 @@ static void _snd_playSound(game_t* game, uint16_t resNum, uint8_t freq, uint8_t 
 	case Resource::DT_DOS: {
 			MemEntry *me = &_state->_res._memList[resNum];
 			if (me->status == Resource::STATUS_LOADED) {
-				_state->_mix.playSoundRaw(channel, me->bufPtr, _get_sound_freq(freq), vol);
+                _game_audio_play_sound_raw(game, channel, me->bufPtr, _get_sound_freq(freq), vol);
 			}
 		}
 		break;
@@ -463,25 +791,24 @@ static void _op_updateResources(game_t* game) {
 	uint16_t num = fetchWord(&game->vm.ptr);
 	debug(DBG_SCRIPT, "Script::op_updateResources(%d)", num);
 	if (num == 0) {
-		_state->_ply.stop();
-		_state->_mix.stopAll();
+		_game_audio_stop_all(game);
 		_state->_res.invalidateRes();
 	} else {
 		_state->_res.update(num);
 	}
 }
 
-static void _snd_playMusic(uint16_t resNum, uint16_t delay, uint8_t pos) {
+static void _snd_playMusic(game_t* game, uint16_t resNum, uint16_t delay, uint8_t pos) {
 	debug(DBG_SND, "snd_playMusic(0x%X, %d, %d)", resNum, delay, pos);
 	// DT_AMIGA, DT_ATARI, DT_DOS
     if (resNum != 0) {
-        _state->_ply.loadSfxModule(resNum, delay, pos);
-        _state->_ply.start();
-        _state->_mix.playSfxMusic(resNum);
+        _game_audio_sfx_load_module(game, resNum, delay, pos);
+        _game_audio_sfx_start(game);
+        _game_play_sfx_music(game);
     } else if (delay != 0) {
-        _state->_ply.setEventsDelay(delay);
+        _game_audio_sfx_set_events_delay(game, delay);
     } else {
-        _state->_mix.stopSfxMusic();
+        _game_audio_stop_sfx_music(game);
     }
 }
 
@@ -490,7 +817,7 @@ static void _op_playMusic(game_t* game) {
 	uint16_t delay = fetchWord(&game->vm.ptr);
 	uint8_t pos = fetchByte(&game->vm.ptr);
 	debug(DBG_SCRIPT, "Script::op_playMusic(0x%X, %d, %d)", resNum, delay, pos);
-	_snd_playMusic(resNum, delay, pos);
+	_snd_playMusic(game, resNum, delay, pos);
 }
 
 static const _opcode_func _opTable[] = {
@@ -531,13 +858,8 @@ static const _opcode_func _opTable[] = {
 };
 
 // VM
-static void _game_vm_init(game_t* game) {
-	_state->_ply._syncVar = &game->vm.vars[VAR_MUSIC_SYNC];
-}
-
 static void _game_vm_restart_at(game_t* game, int part, int pos) {
-	_state->_ply.stop();
-	_state->_mix.stopAll();
+    _game_audio_stop_all(game);
 	if (_state->_res.getDataType() == Resource::DT_DOS && part == kPartCopyProtection) {
 		// VAR(0x54) indicates if the "Out of this World" title screen should be presented
 		//
@@ -771,7 +1093,6 @@ void game_init(game_t* game, const game_desc_t* desc) {
 	}
 
     _state->_sys.setBuffer(game->gfx.fb, game->gfx.palette);
-    _game_vm_init(game);
     switch (_state->_res.getDataType()) {
     case Resource::DT_DOS:
     case Resource::DT_AMIGA:
@@ -788,8 +1109,8 @@ void game_init(game_t* game, const game_desc_t* desc) {
         }
         break;
     }
-    _state->_mix.callback = desc->audio.callback;
-    _state->_mix.init();
+    game->audio.callback = desc->audio.callback;
+    _game_audio_init(game, desc->audio.callback);
 
     Video::_useEGA = desc->use_ega;
     // bypass protection ?
@@ -836,7 +1157,7 @@ void _game_exec(game_t* game, uint32_t ms) {
     const int num_frames = saudio_expect();
     if (num_frames > 0) {
         const int num_samples = num_frames * saudio_channels();
-        _state->_mix.update(num_samples);
+        _game_audio_update(game, num_samples);
     }
 
     _state->_sys._sleep += 16;
@@ -861,8 +1182,7 @@ void game_cleanup(game_t* game) {
     GAME_ASSERT(game && game->valid);
     (void)game;
     _state->_graphics.fini();
-	_state->_ply.stop();
-	_state->_mix.quit();
+    _game_audio_stop_all(game);
     delete _state;
 }
 

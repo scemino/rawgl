@@ -22,6 +22,20 @@ extern "C" {
 #define VAR_HERO_ACTION_POS_MASK (0xFE)
 #define VAR_PAUSE_SLICES         (0xFF)
 
+#define  MIX_FREQ               (44100)
+#define  MIX_BUF_SIZE           (4096*8)
+#define  MIX_CHANNELS           (4)
+#define  SFX_NUM_CHANNELS       (4)
+
+#define  FRAC_BITS              (16)
+#define  FRAC_MASK              ((1 << FRAC_BITS) - 1)
+
+typedef struct {
+
+	uint32_t inc;
+	uint64_t offset;
+} game_frac_t;
+
 typedef enum  {
 	GAME_LANG_FR,
 	GAME_LANG_US,
@@ -41,6 +55,50 @@ typedef enum  {
     GAME_INPUT_CODE,
     GAME_INPUT_PAUSE,
 } game_input_t;
+
+typedef struct {
+	uint8_t *data;
+	uint16_t volume;
+} game_audio_sfx_instrument_t;
+
+typedef struct {
+	uint16_t    note_1;
+	uint16_t    note_2;
+	uint16_t    sample_start;
+	uint8_t*    sample_buffer;
+	uint16_t    sample_len;
+	uint16_t    loop_pos;
+	uint16_t    loop_len;
+	uint16_t    sample_volume;
+} game_audio_sfx_pattern_t;
+
+typedef struct {
+	const uint8_t*              data;
+	uint16_t                    cur_pos;
+	uint8_t                     cur_order;
+	uint8_t                     num_order;
+	uint8_t*                    order_table;
+	game_audio_sfx_instrument_t samples[15];
+} game_audio_sfx_module_t;
+
+typedef struct  {
+	uint8_t*    sample_data;
+	uint16_t    sample_len;
+	uint16_t    sample_loop_pos;
+	uint16_t    sample_loop_len;
+	uint16_t    volume;
+	game_frac_t pos;
+} game_audio_sfx_channel_t;
+
+typedef struct {
+    uint16_t                    delay;
+	uint16_t                    res_num;
+	game_audio_sfx_module_t     sfx_mod;
+	bool                        playing;
+	int                         rate;
+	int                         samples_left;
+	game_audio_sfx_channel_t    channels[SFX_NUM_CHANNELS];
+} game_audio_sfx_player_t;
 
 typedef struct {
     void (*func)(const float* samples, int num_samples, void* user_data);
@@ -70,14 +128,14 @@ typedef struct {
 } game_framebuffer_t;
 
 typedef struct {
-	uint8_t status;        // 0x0
-	uint8_t type;          // 0x1, Resource::ResType
-	uint8_t *bufPtr;       // 0x2
-	uint8_t rankNum;       // 0x6
-	uint8_t bankNum;       // 0x7
-	uint32_t bankPos;      // 0x8
-	uint32_t packedSize;   // 0xC
-	uint32_t unpackedSize; // 0x12
+	uint8_t     status;        // 0x0
+	uint8_t     type;          // 0x1, Resource::ResType
+	uint8_t*    bufPtr;        // 0x2
+	uint8_t     rankNum;       // 0x6
+	uint8_t     bankNum;       // 0x7
+	uint32_t    bankPos;       // 0x8
+	uint32_t    packedSize;    // 0xC
+	uint32_t    unpackedSize;  // 0x12
 } game_mem_entry_t;
 
 // TODO: rename this
@@ -86,14 +144,30 @@ typedef struct {
 } game_pc_t;
 
 typedef struct {
-    bool valid;
-    game_debug_t debug;
+    const uint8_t *data;
+    game_frac_t   pos;
+    uint32_t      len;
+    uint32_t      loop_len, loop_pos;
+    int           volume;
+} game_audio_channel_t;
+
+typedef struct {
+    bool            valid;
+    game_debug_t    debug;
 
     struct {
         uint8_t             fb[320*200];    // frame buffer: this where is stored the image with indexed color
         game_framebuffer_t  fbs[4];         // frame buffer: this where is stored the image with indexed color
         uint32_t            palette[16];    // palette containing 16 RGBA colors
     } gfx;
+
+    struct {
+        float                   sample_buffer[GAME_MAX_AUDIO_SAMPLES];
+        int16_t                 samples[MIX_BUF_SIZE];
+        game_audio_channel_t    channels[MIX_CHANNELS];
+        game_audio_sfx_player_t sfx_player;
+        game_audio_callback_t   callback;
+    } audio;
 
     struct {
         int16_t     vars[256];
