@@ -1,7 +1,7 @@
 fips_begin_app(raw windowed)
     add_definitions(-DBYPASS_PROTECTION)
     fips_files(raw.c game-impl.cc
-    bitmap.cpp file.cpp graphics_sokol.cc sokol_sys.cc unpack.cpp util.cpp)
+    bitmap.cpp file.cpp sokol_sys.cc unpack.cpp util.cpp)
     fips_deps(gfx sokol)
     if (FIPS_EMSCRIPTEN)
     else()
@@ -13,7 +13,7 @@ fips_end_app()
 fips_begin_app(raw-ui windowed)
     add_definitions(-DBYPASS_PROTECTION)
     fips_files(raw.c game-impl.cc raw-ui-impl.cc
-    bitmap.cpp file.cpp graphics_sokol.cc sokol_sys.cc unpack.cpp util.cpp)
+    bitmap.cpp file.cpp sokol_sys.cc unpack.cpp util.cpp)
     fips_deps(gfx sokol)
     if (FIPS_EMSCRIPTEN)
     else()

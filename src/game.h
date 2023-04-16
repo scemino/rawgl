@@ -33,6 +33,8 @@ extern "C" {
 #define  MIX_CHANNELS           (4)
 #define  SFX_NUM_CHANNELS       (4)
 
+#define  FIXUP_PALETTE_REDRAW   (1)
+
 #define  FRAC_BITS              (16)
 #define  FRAC_MASK              ((1 << FRAC_BITS) - 1)
 
@@ -83,6 +85,13 @@ typedef struct {
 	uint8_t *data;
 	uint16_t volume;
 } game_audio_sfx_instrument_t;
+
+typedef enum {
+    DIR_LEFT  = 1 << 0,
+    DIR_RIGHT = 1 << 1,
+    DIR_UP    = 1 << 2,
+    DIR_DOWN  = 1 << 3
+} game_input_dir_t;
 
 typedef struct {
 	uint16_t    note_1;
@@ -204,6 +213,11 @@ typedef struct {
         uint8_t             fb[GAME_WIDTH*GAME_HEIGHT];    // frame buffer: this where is stored the image with indexed color
         game_framebuffer_t  fbs[4];         // frame buffer: this where is stored the image with indexed color
         uint32_t            palette[16];    // palette containing 16 RGBA colors
+        uint8_t*            draw_page_ptr;
+        int                 u, v;
+        int                 fix_up_palette;
+        uint32_t            pal[16];
+        uint8_t             color_buffer[GAME_WIDTH * GAME_HEIGHT];
     } gfx;
 
     struct {
@@ -237,6 +251,19 @@ typedef struct {
         uint32_t    start_time, time_stamp;
     } vm;
 
+    struct {
+        uint8_t dirMask;
+        bool    action; // run,shoot
+        bool    jump;
+        bool    code;
+        bool    pause;
+        bool    quit;
+        bool    back;
+        char    lastChar;
+        bool    fastMode;
+        bool    screenshot;
+    } input;
+
     const char* title;      // title of the game
 } game_t;
 
@@ -247,8 +274,6 @@ void game_cleanup(game_t* game);
 void game_key_down(game_t* game, game_input_t input);
 void game_key_up(game_t* game, game_input_t input);
 void game_char_pressed(game_t* game, int c);
-void game_get_resources(game_t* game, game_mem_entry_t** res);
-uint8_t* game_get_pc(game_t* game);
 bool game_get_res_buf(game_t* game, int id, uint8_t* dst);
 
 #ifdef __cplusplus

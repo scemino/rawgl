@@ -4,8 +4,6 @@
 #include "gfx.h"
 #include "common.h"
 #include "game.h"
-#include "graphics.h"
-#include "graphics_sokol.h"
 #include "systemstub.h"
 #include "sokol_audio.h"
 #include "sokol_sys.h"
@@ -14,6 +12,67 @@
 #include "raw-data.h"
 #include "unpack.h"
 #include "bitmap.h"
+
+#define _GFX_COL_ALPHA (0x10) // transparent pixel (OR'ed with 0x8)
+#define _GFX_COL_PAGE  (0x11) // buffer 0 pixel
+#define _GFX_COL_BMP   (0xFF) // bitmap in buffer 0 pixel
+#define _GFX_FMT_CLUT       (0)
+#define _GFX_FMT_RGB555     (1)
+#define _GFX_FMT_RGB        (2)
+#define _GFX_FMT_RGBA       (3)
+
+typedef void (*_gfx_draw_line_t)(game_t* game, int16_t x1, int16_t x2, int16_t y, uint8_t col);
+
+static const uint8_t _font[] = {
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x10, 0x10, 0x10, 0x10, 0x00, 0x10, 0x00,
+	0x28, 0x28, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x24, 0x7E, 0x24, 0x24, 0x7E, 0x24, 0x00,
+	0x08, 0x3E, 0x48, 0x3C, 0x12, 0x7C, 0x10, 0x00, 0x42, 0xA4, 0x48, 0x10, 0x24, 0x4A, 0x84, 0x00,
+	0x60, 0x90, 0x90, 0x70, 0x8A, 0x84, 0x7A, 0x00, 0x08, 0x08, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x06, 0x08, 0x10, 0x10, 0x10, 0x08, 0x06, 0x00, 0xC0, 0x20, 0x10, 0x10, 0x10, 0x20, 0xC0, 0x00,
+	0x00, 0x44, 0x28, 0x10, 0x28, 0x44, 0x00, 0x00, 0x00, 0x10, 0x10, 0x7C, 0x10, 0x10, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x10, 0x20, 0x00, 0x00, 0x00, 0x7C, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x10, 0x28, 0x10, 0x00, 0x00, 0x04, 0x08, 0x10, 0x20, 0x40, 0x00, 0x00,
+	0x78, 0x84, 0x8C, 0x94, 0xA4, 0xC4, 0x78, 0x00, 0x10, 0x30, 0x50, 0x10, 0x10, 0x10, 0x7C, 0x00,
+	0x78, 0x84, 0x04, 0x08, 0x30, 0x40, 0xFC, 0x00, 0x78, 0x84, 0x04, 0x38, 0x04, 0x84, 0x78, 0x00,
+	0x08, 0x18, 0x28, 0x48, 0xFC, 0x08, 0x08, 0x00, 0xFC, 0x80, 0xF8, 0x04, 0x04, 0x84, 0x78, 0x00,
+	0x38, 0x40, 0x80, 0xF8, 0x84, 0x84, 0x78, 0x00, 0xFC, 0x04, 0x04, 0x08, 0x10, 0x20, 0x40, 0x00,
+	0x78, 0x84, 0x84, 0x78, 0x84, 0x84, 0x78, 0x00, 0x78, 0x84, 0x84, 0x7C, 0x04, 0x08, 0x70, 0x00,
+	0x00, 0x18, 0x18, 0x00, 0x00, 0x18, 0x18, 0x00, 0x00, 0x00, 0x18, 0x18, 0x00, 0x10, 0x10, 0x60,
+	0x04, 0x08, 0x10, 0x20, 0x10, 0x08, 0x04, 0x00, 0x00, 0x00, 0xFE, 0x00, 0x00, 0xFE, 0x00, 0x00,
+	0x20, 0x10, 0x08, 0x04, 0x08, 0x10, 0x20, 0x00, 0x7C, 0x82, 0x02, 0x0C, 0x10, 0x00, 0x10, 0x00,
+	0x30, 0x18, 0x0C, 0x0C, 0x0C, 0x18, 0x30, 0x00, 0x78, 0x84, 0x84, 0xFC, 0x84, 0x84, 0x84, 0x00,
+	0xF8, 0x84, 0x84, 0xF8, 0x84, 0x84, 0xF8, 0x00, 0x78, 0x84, 0x80, 0x80, 0x80, 0x84, 0x78, 0x00,
+	0xF8, 0x84, 0x84, 0x84, 0x84, 0x84, 0xF8, 0x00, 0x7C, 0x40, 0x40, 0x78, 0x40, 0x40, 0x7C, 0x00,
+	0xFC, 0x80, 0x80, 0xF0, 0x80, 0x80, 0x80, 0x00, 0x7C, 0x80, 0x80, 0x8C, 0x84, 0x84, 0x7C, 0x00,
+	0x84, 0x84, 0x84, 0xFC, 0x84, 0x84, 0x84, 0x00, 0x7C, 0x10, 0x10, 0x10, 0x10, 0x10, 0x7C, 0x00,
+	0x04, 0x04, 0x04, 0x04, 0x84, 0x84, 0x78, 0x00, 0x8C, 0x90, 0xA0, 0xE0, 0x90, 0x88, 0x84, 0x00,
+	0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0xFC, 0x00, 0x82, 0xC6, 0xAA, 0x92, 0x82, 0x82, 0x82, 0x00,
+	0x84, 0xC4, 0xA4, 0x94, 0x8C, 0x84, 0x84, 0x00, 0x78, 0x84, 0x84, 0x84, 0x84, 0x84, 0x78, 0x00,
+	0xF8, 0x84, 0x84, 0xF8, 0x80, 0x80, 0x80, 0x00, 0x78, 0x84, 0x84, 0x84, 0x84, 0x8C, 0x7C, 0x03,
+	0xF8, 0x84, 0x84, 0xF8, 0x90, 0x88, 0x84, 0x00, 0x78, 0x84, 0x80, 0x78, 0x04, 0x84, 0x78, 0x00,
+	0x7C, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x00, 0x84, 0x84, 0x84, 0x84, 0x84, 0x84, 0x78, 0x00,
+	0x84, 0x84, 0x84, 0x84, 0x84, 0x48, 0x30, 0x00, 0x82, 0x82, 0x82, 0x82, 0x92, 0xAA, 0xC6, 0x00,
+	0x82, 0x44, 0x28, 0x10, 0x28, 0x44, 0x82, 0x00, 0x82, 0x44, 0x28, 0x10, 0x10, 0x10, 0x10, 0x00,
+	0xFC, 0x04, 0x08, 0x10, 0x20, 0x40, 0xFC, 0x00, 0x3C, 0x30, 0x30, 0x30, 0x30, 0x30, 0x3C, 0x00,
+	0x3C, 0x30, 0x30, 0x30, 0x30, 0x30, 0x3C, 0x00, 0x3C, 0x30, 0x30, 0x30, 0x30, 0x30, 0x3C, 0x00,
+	0x3C, 0x30, 0x30, 0x30, 0x30, 0x30, 0x3C, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFE,
+	0x3C, 0x30, 0x30, 0x30, 0x30, 0x30, 0x3C, 0x00, 0x00, 0x00, 0x38, 0x04, 0x3C, 0x44, 0x3C, 0x00,
+	0x40, 0x40, 0x78, 0x44, 0x44, 0x44, 0x78, 0x00, 0x00, 0x00, 0x3C, 0x40, 0x40, 0x40, 0x3C, 0x00,
+	0x04, 0x04, 0x3C, 0x44, 0x44, 0x44, 0x3C, 0x00, 0x00, 0x00, 0x38, 0x44, 0x7C, 0x40, 0x3C, 0x00,
+	0x38, 0x44, 0x40, 0x60, 0x40, 0x40, 0x40, 0x00, 0x00, 0x00, 0x3C, 0x44, 0x44, 0x3C, 0x04, 0x78,
+	0x40, 0x40, 0x58, 0x64, 0x44, 0x44, 0x44, 0x00, 0x10, 0x00, 0x10, 0x10, 0x10, 0x10, 0x10, 0x00,
+	0x02, 0x00, 0x02, 0x02, 0x02, 0x02, 0x42, 0x3C, 0x40, 0x40, 0x46, 0x48, 0x70, 0x48, 0x46, 0x00,
+	0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x00, 0x00, 0x00, 0xEC, 0x92, 0x92, 0x92, 0x92, 0x00,
+	0x00, 0x00, 0x78, 0x44, 0x44, 0x44, 0x44, 0x00, 0x00, 0x00, 0x38, 0x44, 0x44, 0x44, 0x38, 0x00,
+	0x00, 0x00, 0x78, 0x44, 0x44, 0x78, 0x40, 0x40, 0x00, 0x00, 0x3C, 0x44, 0x44, 0x3C, 0x04, 0x04,
+	0x00, 0x00, 0x4C, 0x70, 0x40, 0x40, 0x40, 0x00, 0x00, 0x00, 0x3C, 0x40, 0x38, 0x04, 0x78, 0x00,
+	0x10, 0x10, 0x3C, 0x10, 0x10, 0x10, 0x0C, 0x00, 0x00, 0x00, 0x44, 0x44, 0x44, 0x44, 0x78, 0x00,
+	0x00, 0x00, 0x44, 0x44, 0x44, 0x28, 0x10, 0x00, 0x00, 0x00, 0x82, 0x82, 0x92, 0xAA, 0xC6, 0x00,
+	0x00, 0x00, 0x44, 0x28, 0x10, 0x28, 0x44, 0x00, 0x00, 0x00, 0x42, 0x22, 0x24, 0x18, 0x08, 0x30,
+	0x00, 0x00, 0x7C, 0x08, 0x10, 0x20, 0x7C, 0x00, 0x60, 0x90, 0x20, 0x40, 0xF0, 0x00, 0x00, 0x00,
+	0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0x00, 0x38, 0x44, 0xBA, 0xA2, 0xBA, 0x44, 0x38, 0x00,
+	0x38, 0x44, 0x82, 0x82, 0x44, 0x28, 0xEE, 0x00, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA
+};
 
 static const int _restartPos[36 * 2] = {
 	16008,  0, 16001,  0, 16002, 10, 16002, 12, 16002, 14,
@@ -374,13 +433,11 @@ typedef void (*_opcode_func)(game_t* game);
 
 class GameState {
 public:
-    GraphicsSokol _graphics;
     SokolSystem _sys;
     int _part_num;
 };
 
 GameState* _state;
-bool Graphics::_is1991 = false;
 
 #ifdef __cplusplus
 extern "C" {
@@ -577,7 +634,7 @@ static void _game_audio_sfx_handle_pattern(game_t* game, uint8_t channel, const 
 	} else if (pat.note_1 == 0xFFFE) {
 		player->channels[channel].sample_len = 0;
 	} else if (pat.note_1 != 0 && pat.sample_buffer != 0) {
-		assert(pat.note_1 >= 0x37 && pat.note_1 < 0x1000);
+		GAME_ASSERT(pat.note_1 >= 0x37 && pat.note_1 < 0x1000);
 		// convert Amiga period value to hz
 		const int freq = kPaulaFreq / (pat.note_1 * 2);
 		debug(DBG_SND, "SfxPlayer::handlePattern() adding sample freq = 0x%X", freq);
@@ -644,50 +701,264 @@ static void _game_audio_sfx_read_samples(game_t* game, int16_t *buf, int len) {
 	}
 }
 
+// Gfx
+
+static void _game_gfx_set_palette(game_t* game, const uint32_t *colors, int count) {
+    GAME_ASSERT(count <= 16);
+	memcpy(game->gfx.pal, colors, sizeof(uint32_t) * count);
+    for(int i=0; i<count; i++) {
+        game->gfx.palette[i] = colors[i];
+    }
+    _state->_sys.setPalette(game->gfx.palette);
+}
+
+static uint8_t* _game_gfx_get_page_ptr(game_t* game, uint8_t page) {
+	GAME_ASSERT(page >= 0 && page < 4);
+	return game->gfx.fbs[page].buffer;
+}
+
+static void _game_gfx_set_work_page_ptr(game_t* game, uint8_t page) {
+	game->gfx.draw_page_ptr = _game_gfx_get_page_ptr(game, page);
+}
+
+static void _game_gfx_clear_buffer(game_t* game, int num, uint8_t color) {
+	memset(_game_gfx_get_page_ptr(game, num), color, GAME_WIDTH * GAME_HEIGHT);
+}
+
+static inline int _game_gfx_x_scale(game_t* game, int x) { return (x * game->gfx.u) >> 16; }
+static inline int _game_gfx_y_scale(game_t* game, int y) { return (y * game->gfx.v) >> 16; }
+
+static void _game_gfx_copy_buffer(game_t* game, int dst, int src, int vscroll) {
+	if (vscroll == 0) {
+		memcpy(_game_gfx_get_page_ptr(game, dst), _game_gfx_get_page_ptr(game, src), GAME_WIDTH * GAME_HEIGHT);
+	} else if (vscroll >= -199 && vscroll <= 199) {
+		const int dy = _game_gfx_y_scale(game, vscroll);
+		if (dy < 0) {
+			memcpy(_game_gfx_get_page_ptr(game, dst), _game_gfx_get_page_ptr(game, src) - dy * GAME_WIDTH, (GAME_HEIGHT + dy) * GAME_WIDTH);
+		} else {
+			memcpy(_game_gfx_get_page_ptr(game, dst) + dy * GAME_WIDTH, _game_gfx_get_page_ptr(game, src), (GAME_HEIGHT - dy) * GAME_WIDTH);
+		}
+	}
+}
+
+static void _game_gfx_draw_buffer(game_t* game, int num) {
+	int w, h;
+	float ar[4];
+	_state->_sys.prepareScreen(w, h, ar);
+
+    const uint8_t *src = _game_gfx_get_page_ptr(game, num);
+    memcpy(game->gfx.color_buffer, src, GAME_WIDTH * GAME_HEIGHT);
+    _state->_sys.setScreenPixels(game->gfx.color_buffer, GAME_WIDTH, GAME_HEIGHT);
+	_state->_sys.updateScreen();
+}
+
+static void _game_gfx_draw_char(game_t* game, uint8_t c, uint16_t x, uint16_t y, uint8_t color) {
+	if (x <= GAME_WIDTH - 8 && y <= GAME_HEIGHT - 8) {
+		x = _game_gfx_x_scale(game, x);
+		y = _game_gfx_y_scale(game, y);
+		const uint8_t *ft = _font + (c - 0x20) * 8;
+		const int offset = (x + y * GAME_WIDTH);
+        for (int j = 0; j < 8; ++j) {
+            const uint8_t ch = ft[j];
+            for (int i = 0; i < 8; ++i) {
+                if (ch & (1 << (7 - i))) {
+                    game->gfx.draw_page_ptr[offset + j * GAME_WIDTH + i] = color;
+                }
+            }
+        }
+	}
+}
+
+static void _game_gfx_draw_string_char(game_t* game, int buffer, uint8_t color, char c, const Point *pt) {
+	_game_gfx_set_work_page_ptr(game, buffer);
+	_game_gfx_draw_char(game, c, pt->x, pt->y, color);
+}
+
+static void _game_gfx_drawPoint(game_t* game, int16_t x, int16_t y, uint8_t color) {
+	x = _game_gfx_x_scale(game, x);
+	y = _game_gfx_y_scale(game, y);
+    const int offset = (y * GAME_WIDTH + x);
+    switch (color) {
+    case _GFX_COL_ALPHA:
+        game->gfx.draw_page_ptr[offset] |= 8;
+        break;
+    case _GFX_COL_PAGE:
+        game->gfx.draw_page_ptr[offset] = *(game->gfx.fbs[0].buffer + offset);
+        break;
+    default:
+        game->gfx.draw_page_ptr[offset] = color;
+        break;
+    }
+}
+
+static void _game_gfx_draw_point(game_t* game, int buffer, uint8_t color, const Point *pt) {
+	_game_gfx_set_work_page_ptr(game, buffer);
+	_game_gfx_drawPoint(game, pt->x, pt->y, color);
+}
+
+static uint32_t _calc_step(const Point &p1, const Point &p2, uint16_t &dy) {
+	dy = p2.y - p1.y;
+	uint16_t delta = (dy <= 1) ? 1 : dy;
+	return ((p2.x - p1.x) * (0x4000 / delta)) << 2;
+}
+
+
+static void _game_gfx_draw_line_p(game_t* game, int16_t x1, int16_t x2, int16_t y, uint8_t color) {
+    (void)color;
+	if (game->gfx.draw_page_ptr == game->gfx.fbs[0].buffer) {
+		return;
+	}
+	const int16_t xmax = MAX(x1, x2);
+	const int16_t xmin = MIN(x1, x2);
+	const int w = xmax - xmin + 1;
+	const int offset = (y * GAME_WIDTH + xmin);
+	memcpy(game->gfx.draw_page_ptr + offset, game->gfx.fbs[0].buffer + offset, w);
+}
+
+static void _game_gfx_draw_line_n(game_t* game, int16_t x1, int16_t x2, int16_t y, uint8_t color) {
+	const int16_t xmax = MAX(x1, x2);
+	const int16_t xmin = MIN(x1, x2);
+	const int w = xmax - xmin + 1;
+	const int offset = (y * GAME_WIDTH + xmin);
+	memset(game->gfx.draw_page_ptr + offset, color, w);
+}
+
+static void _game_gfx_draw_line_trans(game_t* game, int16_t x1, int16_t x2, int16_t y, uint8_t color) {
+    (void)color;
+	const int16_t xmax = MAX(x1, x2);
+	const int16_t xmin = MIN(x1, x2);
+	const int w = xmax - xmin + 1;
+	const int offset = (y * GAME_WIDTH + xmin);
+	for (int i = 0; i < w; ++i) {
+        game->gfx.draw_page_ptr[offset + i] |= 8;
+    }
+}
+
+static void _game_gfx_draw_bitmap(game_t* game, int buffer, const uint8_t *data, int w, int h, int fmt) {
+    if (fmt == _GFX_FMT_CLUT && GAME_WIDTH == w && GAME_HEIGHT == h) {
+        memcpy(_game_gfx_get_page_ptr(game, buffer), data, w * h);
+        return;
+    }
+	warning("GraphicsSokol::drawBitmap() unhandled fmt %d w %d h %d", fmt, w, h);
+}
+
+static void _game_gfx_draw_polygon(game_t* game, uint8_t color, const QuadStrip &quadStrip) {
+	QuadStrip qs = quadStrip;
+
+	int i = 0;
+	int j = qs.numVertices - 1;
+
+	int16_t x2 = qs.vertices[i].x;
+	int16_t x1 = qs.vertices[j].x;
+	int16_t hliney = MIN(qs.vertices[i].y, qs.vertices[j].y);
+
+	++i;
+	--j;
+
+	_gfx_draw_line_t pdl;
+	switch (color) {
+	default:
+		pdl = &_game_gfx_draw_line_n;
+		break;
+	case _GFX_COL_PAGE:
+		pdl = &_game_gfx_draw_line_p;
+		break;
+	case _GFX_COL_ALPHA:
+		pdl = &_game_gfx_draw_line_trans;
+		break;
+	}
+
+	uint32_t cpt1 = x1 << 16;
+	uint32_t cpt2 = x2 << 16;
+
+	int numVertices = qs.numVertices;
+	while (1) {
+		numVertices -= 2;
+		if (numVertices == 0) {
+			return;
+		}
+		uint16_t h;
+		uint32_t step1 = _calc_step(qs.vertices[j + 1], qs.vertices[j], h);
+		uint32_t step2 = _calc_step(qs.vertices[i - 1], qs.vertices[i], h);
+
+		++i;
+		--j;
+
+		cpt1 = (cpt1 & 0xFFFF0000) | 0x7FFF;
+		cpt2 = (cpt2 & 0xFFFF0000) | 0x8000;
+
+		if (h == 0) {
+			cpt1 += step1;
+			cpt2 += step2;
+		} else {
+			while (h--) {
+				if (hliney >= 0) {
+					x1 = cpt1 >> 16;
+					x2 = cpt2 >> 16;
+					if (x1 < GAME_WIDTH && x2 >= 0) {
+						if (x1 < 0) x1 = 0;
+						if (x2 >= GAME_WIDTH) x2 = GAME_WIDTH - 1;
+						(*pdl)(game, x1, x2, hliney, color);
+					}
+				}
+				cpt1 += step1;
+				cpt2 += step2;
+				++hliney;
+				if (hliney >= GAME_HEIGHT) return;
+			}
+		}
+	}
+}
+
+static void _game_gfx_draw_quad_strip(game_t* game, int buffer, uint8_t color, const QuadStrip *qs) {
+	_game_gfx_set_work_page_ptr(game, buffer);
+	_game_gfx_draw_polygon(game, color, *qs);
+}
+
 // Video
-static void _game_video_read_palette_ega(const uint8_t *buf, int num, Color pal[16]) {
+static void _game_video_read_palette_ega(const uint8_t *buf, int num, uint32_t pal[16]) {
 	const uint8_t *p = buf + num * 16 * sizeof(uint16_t);
 	p += 1024; // EGA colors are stored after VGA (Amiga)
 	for (int i = 0; i < 16; ++i) {
 		const uint16_t color = READ_BE_UINT16(p); p += 2;
 		if (1) {
 			const uint8_t *ega = &_paletteEGA[3 * ((color >> 12) & 15)];
-			pal[i].r = ega[0];
-			pal[i].g = ega[1];
-			pal[i].b = ega[2];
+			pal[i] = 0xFF000000 | (((uint32_t)ega[0])) | (((uint32_t)ega[1]) << 8) | (((uint32_t)ega[2]) << 16);
 		} else { // lower 12 bits hold other colors
-			const uint8_t r = (color >> 8) & 0xF;
-			const uint8_t g = (color >> 4) & 0xF;
-			const uint8_t b =  color       & 0xF;
-			pal[i].r = (r << 4) | r;
-			pal[i].g = (g << 4) | g;
-			pal[i].b = (b << 4) | b;
+			uint32_t r = (color >> 8) & 0xF;
+			uint32_t g = (color >> 4) & 0xF;
+			uint32_t b =  color       & 0xF;
+			r = (r << 4) | r;
+			g = (g << 4) | g;
+			b = (b << 4) | b;
+            pal[i] = 0xFF000000 | (((uint32_t)r)) | (((uint32_t)g) << 8) | (((uint32_t)b) << 16);
 		}
 	}
 }
 
-static void _game_video_read_palette_amiga(const uint8_t *buf, int num, Color pal[16]) {
+static void _game_video_read_palette_amiga(const uint8_t *buf, int num, uint32_t pal[16]) {
 	const uint8_t *p = buf + num * 16 * sizeof(uint16_t);
 	for (int i = 0; i < 16; ++i) {
 		const uint16_t color = READ_BE_UINT16(p); p += 2;
-		const uint8_t r = (color >> 8) & 0xF;
-		const uint8_t g = (color >> 4) & 0xF;
-		const uint8_t b =  color       & 0xF;
-		pal[i].r = (r << 4) | r;
-		pal[i].g = (g << 4) | g;
-		pal[i].b = (b << 4) | b;
+		uint32_t r = (color >> 8) & 0xF;
+		uint32_t g = (color >> 4) & 0xF;
+		uint32_t b =  color       & 0xF;
+		r = (r << 4) | r;
+		g = (g << 4) | g;
+		b = (b << 4) | b;
+        pal[i] = 0xFF000000 | (((uint32_t)r)) | (((uint32_t)g) << 8) | (((uint32_t)b) << 16);
 	}
 }
 
 static void _game_video_change_pal(game_t* game, uint8_t palNum) {
     if (palNum < 32 && palNum != game->video.current_pal) {
-		Color pal[16];
+		uint32_t pal[16];
 		if (game->res.data_type == DT_DOS && game->video.use_ega) {
 			_game_video_read_palette_ega(game->res.seg_video_pal, palNum, pal);
 		} else {
 			_game_video_read_palette_amiga(game->res.seg_video_pal, palNum, pal);
 		}
-		_state->_graphics.setPalette(pal, 16);
+		_game_gfx_set_palette(game, pal, 16);
 		game->video.current_pal = palNum;
 	}
 }
@@ -720,23 +991,23 @@ static void _game_video_set_work_page_ptr(game_t* game, uint8_t page) {
 
 static void _game_video_fill_page(game_t* game, uint8_t page, uint8_t color) {
 	debug(DBG_VIDEO, "Video::fillPage(%d, %d)", page, color);
-	_state->_graphics.clearBuffer(_game_video_get_page_ptr(game, page), color);
+    _game_gfx_clear_buffer(game, _game_video_get_page_ptr(game, page), color);
 }
 
 static void _game_video_copy_page(game_t* game, uint8_t src, uint8_t dst, int16_t vscroll) {
 	debug(DBG_VIDEO, "Video::copyPage(%d, %d)", src, dst);
 	if (src >= 0xFE || ((src &= ~0x40) & 0x80) == 0) { // no vscroll
-		_state->_graphics.copyBuffer(_game_video_get_page_ptr(game, dst), _game_video_get_page_ptr(game, src));
+        _game_gfx_copy_buffer(game, _game_video_get_page_ptr(game, dst), _game_video_get_page_ptr(game, src), 0);
 	} else {
 		uint8_t sl = _game_video_get_page_ptr(game, src & 3);
 		uint8_t dl = _game_video_get_page_ptr(game, dst);
 		if (sl != dl && vscroll >= -199 && vscroll <= 199) {
-			_state->_graphics.copyBuffer(dl, sl, vscroll);
+            _game_gfx_copy_buffer(game, dl, sl, vscroll);
 		}
 	}
 }
 
-static void _game_video_update_display(game_t* game, uint8_t page, SystemStub *stub) {
+static void _game_video_update_display(game_t* game, uint8_t page) {
 	debug(DBG_VIDEO, "Video::updateDisplay(%d)", page);
 	if (page != 0xFE) {
 		if (page == 0xFF) {
@@ -749,7 +1020,7 @@ static void _game_video_update_display(game_t* game, uint8_t page, SystemStub *s
         _game_video_change_pal(game, game->video.next_pal);
 		game->video.next_pal = 0xFF;
 	}
-	_state->_graphics.drawBuffer(game->video.buffers[1], stub);
+	_game_gfx_draw_buffer(game, game->video.buffers[1]);
 }
 
 static void _game_video_draw_string(game_t* game, uint8_t color, uint16_t x, uint16_t y, uint16_t strId) {
@@ -786,7 +1057,7 @@ static void _game_video_draw_string(game_t* game, uint8_t color, uint16_t x, uin
 			}
 		} else {
 			Point pt(x * 8, y);
-			_state->_graphics.drawStringChar(game->video.buffers[0], color, str[i], &pt);
+			_game_gfx_draw_string_char(game, game->video.buffers[0], color, str[i], &pt);
 			++x;
 		}
 	}
@@ -817,7 +1088,7 @@ static void _game_video_fill_polygon(game_t* game, uint16_t color, uint16_t zoom
 		warning("Unexpected number of vertices %d", qs.numVertices);
 		return;
 	}
-	assert(qs.numVertices < QuadStrip::MAX_VERTICES);
+	GAME_ASSERT(qs.numVertices < QuadStrip::MAX_VERTICES);
 
 	for (int i = 0; i < qs.numVertices; ++i) {
 		Point *v = &qs.vertices[i];
@@ -826,9 +1097,9 @@ static void _game_video_fill_polygon(game_t* game, uint16_t color, uint16_t zoom
 	}
 
 	if (qs.numVertices == 4 && bbw == 0 && bbh <= 1) {
-		_state->_graphics.drawPoint(game->video.buffers[0], color, pt);
+		_game_gfx_draw_point(game, game->video.buffers[0], color, pt);
 	} else {
-		_state->_graphics.drawQuadStrip(game->video.buffers[0], color, &qs);
+		_game_gfx_draw_quad_strip(game, game->video.buffers[0], color, &qs);
 	}
 }
 
@@ -848,13 +1119,7 @@ static void _game_video_draw_shape_parts(game_t* game, uint16_t zoom, const Poin
 		uint16_t color = 0xFF;
 		if (offset & 0x8000) {
 			color = fetchByte(&game->video.p_data);
-			const int num = fetchByte(&game->video.p_data);
-			if (Graphics::_is1991) {
-				if ((color & 0x80) != 0) {
-					_state->_graphics.drawSprite(game->video.buffers[0], num, &po, color & 0x7F);
-					continue;
-				}
-			}
+            const int num = fetchByte(&game->video.p_data);
 			color &= 0x7F;
 		}
 		offset <<= 1;
@@ -892,9 +1157,9 @@ static void _game_video_init(game_t* game) {
 }
 
 static void _decode_amiga(const uint8_t *src, uint8_t *dst) {
-	static const int plane_size = GFX_H * GFX_W / 8;
-	for (int y = 0; y < GFX_H; ++y) {
-		for (int x = 0; x < GFX_W; x += 8) {
+	static const int plane_size = GAME_HEIGHT * GAME_WIDTH / 8;
+	for (int y = 0; y < GAME_HEIGHT; ++y) {
+		for (int x = 0; x < GAME_WIDTH; x += 8) {
 			for (int b = 0; b < 8; ++b) {
 				const int mask = 1 << (7 - b);
 				uint8_t color = 0;
@@ -911,8 +1176,8 @@ static void _decode_amiga(const uint8_t *src, uint8_t *dst) {
 }
 
 static void _decode_atari(const uint8_t *src, uint8_t *dst) {
-	for (int y = 0; y < GFX_H; ++y) {
-		for (int x = 0; x < GFX_W; x += 16) {
+	for (int y = 0; y < GAME_HEIGHT; ++y) {
+		for (int x = 0; x < GAME_WIDTH; x += 16) {
 			for (int b = 0; b < 16; ++b) {
 				const int mask = 1 << (15 - b);
 				uint8_t color = 0;
@@ -928,41 +1193,24 @@ static void _decode_atari(const uint8_t *src, uint8_t *dst) {
 	}
 }
 
-static void _yflip(const uint8_t *src, int w, int h, uint8_t *dst) {
-	for (int y = 0; y < h; ++y) {
-		memcpy(dst + (h - 1 - y) * w, src, w);
-		src += w;
-	}
-}
-
 static void _game_video_scale_bitmap(game_t* game, const uint8_t *src, int fmt) {
-    _state->_graphics.drawBitmap(game->video.buffers[0], src, GFX_H, GFX_H, fmt);
+    _game_gfx_draw_bitmap(game, game->video.buffers[0], src, GAME_WIDTH, GAME_HEIGHT, fmt);
 }
 
 static void _game_video_copy_bitmap_ptr(game_t* game, const uint8_t *src, uint32_t size) {
 	if (game->res.data_type == DT_DOS || game->res.data_type == DT_AMIGA) {
 		_decode_amiga(src, game->video.temp_bitmap);
-		_game_video_scale_bitmap(game, game->video.temp_bitmap, FMT_CLUT);
+		_game_video_scale_bitmap(game, game->video.temp_bitmap, _GFX_FMT_CLUT);
 	} else if (game->res.data_type == DT_ATARI) {
 		_decode_atari(src, game->video.temp_bitmap);
-		_game_video_scale_bitmap(game, game->video.temp_bitmap, FMT_CLUT);
+		_game_video_scale_bitmap(game, game->video.temp_bitmap, _GFX_FMT_CLUT);
 	} else { // .BMP
-		if (Graphics::_is1991) {
-			const int w = READ_LE_UINT32(src + 0x12);
-			const int h = READ_LE_UINT32(src + 0x16);
-			if (w == GFX_W && h == GFX_H) {
-				const uint8_t *data = src + READ_LE_UINT32(src + 0xA);
-				_yflip(data, w, h, game->video.temp_bitmap);
-				_game_video_scale_bitmap(game, game->video.temp_bitmap, FMT_CLUT);
-			}
-		} else {
-			int w, h;
-			uint8_t *buf = decode_bitmap(src, &w, &h);
-			if (buf) {
-				_state->_graphics.drawBitmap(game->video.buffers[0], buf, w, h, FMT_RGB);
-				free(buf);
-			}
-		}
+        int w, h;
+        uint8_t *buf = decode_bitmap(src, &w, &h);
+        if (buf) {
+            _game_gfx_draw_bitmap(game, game->video.buffers[0], buf, w, h, _GFX_FMT_RGB);
+            free(buf);
+        }
 	}
 }
 
@@ -1056,8 +1304,8 @@ static void _game_audio_mix_channels(game_t* game, int16_t *samples, int count) 
   }
 
 static void _game_audio_update(game_t* game, int num_samples) {
-    assert(num_samples < MIX_BUF_SIZE);
-    assert(num_samples < GAME_MAX_AUDIO_SAMPLES);
+    GAME_ASSERT(num_samples < MIX_BUF_SIZE);
+    GAME_ASSERT(num_samples < GAME_MAX_AUDIO_SAMPLES);
     memset(game->audio.samples, 0, num_samples*sizeof(int16_t));
     _game_audio_mix_channels(game, game->audio.samples, num_samples);
     _game_audio_sfx_read_samples(game, (int16_t *)game->audio.samples, num_samples);
@@ -1087,7 +1335,7 @@ static void _game_res_read_entries(game_t* game) {
     // TODO:
 	// case DT_AMIGA:
 	// case DT_ATARI:
-	// 	assert(game->res.amigaMemList);
+	// 	GAME_ASSERT(game->res.amigaMemList);
 	// 	readEntriesAmiga(game->res.amigaMemList, ENTRIES_COUNT);
 	// 	return;
 	case DT_DOS: {
@@ -1100,7 +1348,7 @@ static void _game_res_read_entries(game_t* game) {
 				game_mem_entry_t *me = game->res.mem_list;
                 f.setBuffer(dump_MEMLIST_BIN, sizeof(dump_MEMLIST_BIN));
 				while (1) {
-					assert(game->res.num_mem_list < ARRAYSIZE(game->res.mem_list));
+					GAME_ASSERT(game->res.num_mem_list < ARRAYSIZE(game->res.mem_list));
 					me->status = f.readByte();
 					me->type = f.readByte();
 					me->bufPtr = 0; f.readUint32BE();
@@ -1217,7 +1465,7 @@ static void _game_res_load(game_t* game) {
 			break; // no entry found
 		}
 
-		const int resourceNum = me - game->res.mem_list;
+		const size_t resourceNum = me - game->res.mem_list;
 
 		uint8_t *memPtr = 0;
 		if (me->type == RT_BITMAP) {
@@ -1544,7 +1792,7 @@ static void _op_set_palette(game_t* game) {
 	uint16_t i = fetchWord(&game->vm.ptr);
 	debug(DBG_SCRIPT, "Script::op_changePalette(%d)", i);
 	const int num = i >> 8;
-	if (_state->_graphics._fixUpPalette == FIXUP_PALETTE_REDRAW) {
+	if (game->gfx.fix_up_palette == FIXUP_PALETTE_REDRAW) {
 		if (game->res.current_part == 16001) {
 			if (num == 10 || num == 16) {
 				return;
@@ -1599,21 +1847,22 @@ static void _op_copyPage(game_t* game) {
 }
 
 static void _inp_handleSpecialKeys(game_t* game) {
-	if (_state->_sys._pi.pause) {
+	if (game->input.pause) {
 		if (game->res.current_part != kPartCopyProtection && game->res.current_part != kPartIntro) {
-			_state->_sys._pi.pause = false;
-			while (!_state->_sys._pi.pause && !_state->_sys._pi.quit) {
-				_state->_sys.processEvents();
-				_state->_sys.sleep(50);
-			}
+			game->input.pause = false;
+            // TODO:
+			//while (!game->input.pause && !game->input.quit) {
+            //_state->_sys.processEvents();
+            //_state->_sys.sleep(50);
+			//}
 		}
-		_state->_sys._pi.pause = false;
+		game->input.pause = false;
 	}
-	if (_state->_sys._pi.back) {
-		_state->_sys._pi.back = false;
+	if (game->input.back) {
+		game->input.back = false;
     }
-	if (_state->_sys._pi.code) {
-		_state->_sys._pi.code = false;
+	if (game->input.code) {
+		game->input.code = false;
 		if (game->res.has_password_screen) {
 			if (game->res.current_part != kPartPassword && game->res.current_part != kPartCopyProtection) {
 				game->res.next_part = kPartPassword;
@@ -1645,7 +1894,7 @@ static void _op_updateDisplay(game_t* game) {
 	game->vm.time_stamp = _state->_sys.getTimeStamp();
 	game->vm.vars[0xF7] = 0;
 
-	_game_video_update_display(game, page, &_state->_sys);
+	_game_video_update_display(game, page);
 }
 
 static void _op_removeTask(game_t* game) {
@@ -1830,29 +2079,29 @@ static void _game_vm_setup_tasks(game_t* game) {
 static void _game_vm_update_input(game_t* game) {
 	_state->_sys.processEvents();
 	if (game->res.current_part == kPartPassword) {
-		char c = _state->_sys._pi.lastChar;
+		char c = game->input.lastChar;
 		if (c == 8 || /*c == 0xD ||*/ c == 0 || (c >= 'a' && c <= 'z')) {
 			game->vm.vars[VAR_LAST_KEYCHAR] = c & ~0x20;
-			_state->_sys._pi.lastChar = 0;
+			game->input.lastChar = 0;
 		}
 	}
 	int16_t lr = 0;
 	int16_t m = 0;
 	int16_t ud = 0;
 	int16_t jd = 0;
-	if (_state->_sys._pi.dirMask & PlayerInput::DIR_RIGHT) {
+	if (game->input.dirMask & PlayerInput::DIR_RIGHT) {
 		lr = 1;
 		m |= 1;
 	}
-	if (_state->_sys._pi.dirMask & PlayerInput::DIR_LEFT) {
+	if (game->input.dirMask & PlayerInput::DIR_LEFT) {
 		lr = -1;
 		m |= 2;
 	}
-	if (_state->_sys._pi.dirMask & PlayerInput::DIR_DOWN) {
+	if (game->input.dirMask & PlayerInput::DIR_DOWN) {
 		ud = jd = 1;
 		m |= 4; // crouch
 	}
-    if (_state->_sys._pi.dirMask & PlayerInput::DIR_UP) {
+    if (game->input.dirMask & PlayerInput::DIR_UP) {
         ud = jd = -1;
         m |= 8; // jump
     }
@@ -1863,7 +2112,7 @@ static void _game_vm_update_input(game_t* game) {
 	game->vm.vars[VAR_HERO_POS_LEFT_RIGHT] = lr;
 	game->vm.vars[VAR_HERO_POS_MASK] = m;
 	int16_t action = 0;
-	if (_state->_sys._pi.action) {
+	if (game->input.action) {
 		action = 1;
 		m |= 0x80;
 	}
@@ -1962,7 +2211,7 @@ static void _game_vm_execute_task(game_t* game) {
 }
 
 static void _game_vm_run(game_t* game) {
-	for (int i = 0; i < 0x40 && !_state->_sys._pi.quit; ++i) {
+	for (int i = 0; i < 0x40 && !game->input.quit; ++i) {
 		if (game->vm.states[0][i] == 0) {
 			uint16_t n = game->vm.tasks[0][i];
 			if (n != 0xFFFF) {
@@ -1993,23 +2242,13 @@ void game_init(game_t* game, const game_desc_t* desc) {
     _game_video_init(game);
     game->res.has_password_screen = true;
     game->res.script_bak_ptr = game->res.script_cur_ptr = game->res.mem;
-    game->res.vid_cur_ptr = game->res.mem + GAME_MEM_BLOCK_SIZE - (320 * 200 / 2); // 4bpp bitmap
+    game->res.vid_cur_ptr = game->res.mem + GAME_MEM_BLOCK_SIZE - (GAME_WIDTH * GAME_HEIGHT / 2); // 4bpp bitmap
     game->res.lang = desc->lang;
 	_game_res_read_entries(game);
 
-	debug(DBG_INFO, "Using sokol graphics");
-    _state->_graphics.setSystem(&_state->_sys);
-    gfx_fb fbs = {
-        .buffer = {
-            game->gfx.fbs[0].buffer,
-            game->gfx.fbs[1].buffer,
-            game->gfx.fbs[2].buffer,
-            game->gfx.fbs[3].buffer
-        }
-    };
-    _state->_graphics.setBuffers(&fbs);
-    _state->_graphics.init();
-	_state->_graphics.setFont(0, 0, 0);
+    game->gfx.u = (GAME_WIDTH << 16) / GAME_WIDTH;
+	game->gfx.v = (GAME_HEIGHT << 16) / GAME_HEIGHT;
+    _game_gfx_set_work_page_ptr(game, 2);
 
     // TODO:
     // if (desc->demo3_joy_inputs && game->res.data_type == DT_DOS) {
@@ -2105,7 +2344,6 @@ void game_exec(game_t* game, uint32_t ms) {
 void game_cleanup(game_t* game) {
     GAME_ASSERT(game && game->valid);
     (void)game;
-    _state->_graphics.fini();
     _game_audio_stop_all(game);
     delete _state;
 }
@@ -2115,20 +2353,20 @@ gfx_display_info_t game_display_info(game_t* game) {
     const gfx_display_info_t res = {
         .frame = {
             .dim = {
-                .width = GFX_W,
-                .height = GFX_H,
+                .width = GAME_WIDTH,
+                .height = GAME_HEIGHT,
             },
             .bytes_per_pixel = 1,
             .buffer = {
                 .ptr = game->gfx.fb,
-                .size = GFX_W*GFX_H,
+                .size = GAME_WIDTH*GAME_HEIGHT,
             }
         },
         .screen = {
             .x = 0,
             .y = 0,
-            .width = GFX_W,
-            .height = GFX_H,
+            .width = GAME_WIDTH,
+            .height = GAME_HEIGHT,
         },
         .palette = {
             .ptr = game->gfx.palette,
@@ -2141,49 +2379,36 @@ gfx_display_info_t game_display_info(game_t* game) {
 void game_key_down(game_t* game, game_input_t input) {
     (void)game;
     switch(input) {
-        case GAME_INPUT_LEFT:   _state->_sys._pi.dirMask |= PlayerInput::DIR_LEFT; break;
-        case GAME_INPUT_RIGHT:  _state->_sys._pi.dirMask |= PlayerInput::DIR_RIGHT; break;
-        case GAME_INPUT_UP:     _state->_sys._pi.dirMask |= PlayerInput::DIR_UP; break;
-        case GAME_INPUT_DOWN:   _state->_sys._pi.dirMask |= PlayerInput::DIR_DOWN; break;
-        case GAME_INPUT_JUMP:   _state->_sys._pi.jump = true; break;
-        case GAME_INPUT_ACTION: _state->_sys._pi.action = true; break;
-        case GAME_INPUT_BACK:   _state->_sys._pi.back = true; break;
-        case GAME_INPUT_CODE:   _state->_sys._pi.code = true; break;
-        case GAME_INPUT_PAUSE:  _state->_sys._pi.pause = true; break;
+        case GAME_INPUT_LEFT:   game->input.dirMask |= PlayerInput::DIR_LEFT; break;
+        case GAME_INPUT_RIGHT:  game->input.dirMask |= PlayerInput::DIR_RIGHT; break;
+        case GAME_INPUT_UP:     game->input.dirMask |= PlayerInput::DIR_UP; break;
+        case GAME_INPUT_DOWN:   game->input.dirMask |= PlayerInput::DIR_DOWN; break;
+        case GAME_INPUT_JUMP:   game->input.jump = true; break;
+        case GAME_INPUT_ACTION: game->input.action = true; break;
+        case GAME_INPUT_BACK:   game->input.back = true; break;
+        case GAME_INPUT_CODE:   game->input.code = true; break;
+        case GAME_INPUT_PAUSE:  game->input.pause = true; break;
     }
 }
 
 void game_key_up(game_t* game, game_input_t input) {
     (void)game;
     switch(input) {
-        case GAME_INPUT_LEFT:   _state->_sys._pi.dirMask &= ~PlayerInput::DIR_LEFT; break;
-        case GAME_INPUT_RIGHT:  _state->_sys._pi.dirMask &= ~PlayerInput::DIR_RIGHT; break;
-        case GAME_INPUT_UP:     _state->_sys._pi.dirMask &= ~PlayerInput::DIR_UP; break;
-        case GAME_INPUT_DOWN:   _state->_sys._pi.dirMask &= ~PlayerInput::DIR_DOWN; break;
-        case GAME_INPUT_JUMP:   _state->_sys._pi.jump = false; break;
-        case GAME_INPUT_ACTION: _state->_sys._pi.action = false; break;
-        case GAME_INPUT_BACK:   _state->_sys._pi.back = false; break;
-        case GAME_INPUT_CODE:   _state->_sys._pi.code = false; break;
-        case GAME_INPUT_PAUSE:  _state->_sys._pi.pause = false; break;
+        case GAME_INPUT_LEFT:   game->input.dirMask &= ~PlayerInput::DIR_LEFT; break;
+        case GAME_INPUT_RIGHT:  game->input.dirMask &= ~PlayerInput::DIR_RIGHT; break;
+        case GAME_INPUT_UP:     game->input.dirMask &= ~PlayerInput::DIR_UP; break;
+        case GAME_INPUT_DOWN:   game->input.dirMask &= ~PlayerInput::DIR_DOWN; break;
+        case GAME_INPUT_JUMP:   game->input.jump = false; break;
+        case GAME_INPUT_ACTION: game->input.action = false; break;
+        case GAME_INPUT_BACK:   game->input.back = false; break;
+        case GAME_INPUT_CODE:   game->input.code = false; break;
+        case GAME_INPUT_PAUSE:  game->input.pause = false; break;
     }
 }
 
 void game_char_pressed(game_t* game, int c) {
     (void)game;
-    _state->_sys._pi.lastChar = (char)c;
-}
-
-void game_get_resources(game_t* game, game_mem_entry_t** res) {
-    (void)game;
-    *res = game->res.mem_list;
-}
-
-void game_get_vars(game_t* game, int16_t** vars) {
-    *vars = &game->vm.vars[0];
-}
-
-uint8_t* game_get_pc(game_t* game) {
-    return game->res.seg_code;
+    game->input.lastChar = (char)c;
 }
 
 bool game_get_res_buf(game_t* game, int id, uint8_t* dst) {

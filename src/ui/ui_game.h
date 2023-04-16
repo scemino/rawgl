@@ -56,7 +56,6 @@ typedef struct {
     int x, y;
     int w, h;
     bool open;
-    game_mem_entry_t* res;
     void* tex_bmp;
     uint8_t buf[320*200*4];
     int selected;
@@ -284,7 +283,7 @@ static void _ui_game_get_pal_for_res(ui_game_t* ui, int res_id, uint32_t pal[16]
 }
 
 static void _ui_game_draw_sel_res(ui_game_t* ui) {
-    game_mem_entry_t* e = &ui->res.res[ui->res.selected];
+    game_mem_entry_t* e = &ui->game->res.mem_list[ui->res.selected];
     if(e->type == RT_PALETTE) {
         game_get_res_buf(ui->game, ui->res.selected, ui->res.buf);
         for (int num = 0; num < 32; ++num) {
@@ -336,7 +335,7 @@ static void _ui_game_draw_resources(ui_game_t* ui) {
             ImGui::TableHeadersRow();
 
             for(int i=0; i<GAME_ENTRIES_COUNT_20TH; i++) {
-                game_mem_entry_t* e = &ui->res.res[i];
+                game_mem_entry_t* e = &ui->game->res.mem_list[i];
                 if(e->status == 0xFF) break;
 
                 ImGui::TableNextRow();
@@ -411,7 +410,7 @@ static uint8_t _ui_raw_mem_read(int layer, uint16_t addr, void* user_data) {
     GAME_ASSERT(user_data);
     (void)layer;
     game_t* game = (game_t*) user_data;
-    uint8_t* pc = game_get_pc(game);
+    uint8_t* pc = game->res.seg_code;
     return pc[addr];
 }
 
@@ -446,7 +445,6 @@ void ui_game_init(ui_game_t* ui, const ui_game_desc_t* ui_desc) {
         ui->res.y = 20;
         ui->res.w = 562;
         ui->res.h = 568;
-        game_get_resources(ui->game, &ui->res.res);
     }
     {
         ui->vm.x = 10;
