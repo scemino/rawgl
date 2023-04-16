@@ -208,6 +208,9 @@ typedef struct {
     bool            valid;
     game_debug_t    debug;
     game_res_t      res;
+    int             part_num;
+    uint32_t        elapsed;
+    uint32_t        sleep;
 
     struct {
         uint8_t             fb[GAME_WIDTH*GAME_HEIGHT];    // frame buffer: this where is stored the image with indexed color

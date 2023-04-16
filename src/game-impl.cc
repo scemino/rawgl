@@ -4,9 +4,7 @@
 #include "gfx.h"
 #include "common.h"
 #include "game.h"
-#include "systemstub.h"
 #include "sokol_audio.h"
-#include "sokol_sys.h"
 #include "util.h"
 #include "file.h"
 #include "raw-data.h"
@@ -431,14 +429,6 @@ static const char *_kGameTitleUS = "Out Of This World";
 
 typedef void (*_opcode_func)(game_t* game);
 
-class GameState {
-public:
-    SokolSystem _sys;
-    int _part_num;
-};
-
-GameState* _state;
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -706,10 +696,7 @@ static void _game_audio_sfx_read_samples(game_t* game, int16_t *buf, int len) {
 static void _game_gfx_set_palette(game_t* game, const uint32_t *colors, int count) {
     GAME_ASSERT(count <= 16);
 	memcpy(game->gfx.pal, colors, sizeof(uint32_t) * count);
-    for(int i=0; i<count; i++) {
-        game->gfx.palette[i] = colors[i];
-    }
-    _state->_sys.setPalette(game->gfx.palette);
+	memcpy(game->gfx.palette, colors, sizeof(uint32_t) * count);
 }
 
 static uint8_t* _game_gfx_get_page_ptr(game_t* game, uint8_t page) {
@@ -742,14 +729,9 @@ static void _game_gfx_copy_buffer(game_t* game, int dst, int src, int vscroll) {
 }
 
 static void _game_gfx_draw_buffer(game_t* game, int num) {
-	int w, h;
-	float ar[4];
-	_state->_sys.prepareScreen(w, h, ar);
-
     const uint8_t *src = _game_gfx_get_page_ptr(game, num);
     memcpy(game->gfx.color_buffer, src, GAME_WIDTH * GAME_HEIGHT);
-    _state->_sys.setScreenPixels(game->gfx.color_buffer, GAME_WIDTH, GAME_HEIGHT);
-	_state->_sys.updateScreen();
+    memcpy(game->gfx.fb, game->gfx.color_buffer, GAME_WIDTH*GAME_HEIGHT);
 }
 
 static void _game_gfx_draw_char(game_t* game, uint8_t c, uint16_t x, uint16_t y, uint8_t color) {
@@ -1885,13 +1867,13 @@ static void _op_updateDisplay(game_t* game) {
 
 	const int frameHz = 50;
 	if (!game->vm.fast_mode && game->vm.vars[VAR_PAUSE_SLICES] != 0) {
-		const int delay = _state->_sys.getTimeStamp() - game->vm.time_stamp;
+		const int delay = game->elapsed - game->vm.time_stamp;
 		const int pause = game->vm.vars[VAR_PAUSE_SLICES] * 1000 / frameHz - delay;
 		if (pause > 0) {
-			_state->_sys.sleep(pause);
+			game->sleep += pause;
 		}
 	}
-	game->vm.time_stamp = _state->_sys.getTimeStamp();
+	game->vm.time_stamp = game->elapsed;
 	game->vm.vars[0xF7] = 0;
 
 	_game_video_update_display(game, page);
@@ -2052,7 +2034,7 @@ static void _game_vm_restart_at(game_t* game, int part, int pos) {
 	if (pos >= 0) {
 		game->vm.vars[0] = pos;
 	}
-	game->vm.start_time = game->vm.time_stamp = _state->_sys.getTimeStamp();
+	game->vm.start_time = game->vm.time_stamp = game->elapsed;
 	if (part == kPartWater) {
         // TODO:
 		// if (game->res._demo3Joy.start()) {
@@ -2077,7 +2059,6 @@ static void _game_vm_setup_tasks(game_t* game) {
 }
 
 static void _game_vm_update_input(game_t* game) {
-	_state->_sys.processEvents();
 	if (game->res.current_part == kPartPassword) {
 		char c = game->input.lastChar;
 		if (c == 8 || /*c == 0xD ||*/ c == 0 || (c >= 'a' && c <= 'z')) {
@@ -2089,19 +2070,19 @@ static void _game_vm_update_input(game_t* game) {
 	int16_t m = 0;
 	int16_t ud = 0;
 	int16_t jd = 0;
-	if (game->input.dirMask & PlayerInput::DIR_RIGHT) {
+	if (game->input.dirMask & DIR_RIGHT) {
 		lr = 1;
 		m |= 1;
 	}
-	if (game->input.dirMask & PlayerInput::DIR_LEFT) {
+	if (game->input.dirMask & DIR_LEFT) {
 		lr = -1;
 		m |= 2;
 	}
-	if (game->input.dirMask & PlayerInput::DIR_DOWN) {
+	if (game->input.dirMask & DIR_DOWN) {
 		ud = jd = 1;
 		m |= 4; // crouch
 	}
-    if (game->input.dirMask & PlayerInput::DIR_UP) {
+    if (game->input.dirMask & DIR_UP) {
         ud = jd = -1;
         m |= 8; // jump
     }
@@ -2236,8 +2217,7 @@ void game_init(game_t* game, const game_desc_t* desc) {
     game->debug = desc->debug;
 
     g_debugMask = DBG_INFO | DBG_VIDEO | DBG_SND | DBG_SCRIPT | DBG_BANK | DBG_SER;
-    _state = new GameState();
-    _state->_part_num = desc->part_num;
+    game->part_num = desc->part_num;
     _game_res_detect_version(game);
     _game_video_init(game);
     game->res.has_password_screen = true;
@@ -2255,7 +2235,6 @@ void game_init(game_t* game, const game_desc_t* desc) {
 	// 	game->res.readDemo3Joy();
 	// }
 
-    _state->_sys.setBuffer(game->gfx.fb, game->gfx.palette);
     switch (game->res.data_type) {
     case DT_DOS:
     case DT_AMIGA:
@@ -2287,13 +2266,13 @@ void game_init(game_t* game, const game_desc_t* desc) {
         case Resource::DT_AMIGA:
         case Resource::DT_ATARI:
         case Resource::DT_WIN31:
-            _state->_part_num = kPartCopyProtection;
+            game->part_num = kPartCopyProtection;
             break;
         default:
             break;
         }
 #endif
-    const int num = _state->_part_num;
+    const int num = game->part_num;
     if (num < 36) {
         _game_vm_restart_at(game, _restartPos[num * 2], _restartPos[num * 2 + 1]);
     } else {
@@ -2304,12 +2283,12 @@ void game_init(game_t* game, const game_desc_t* desc) {
 
 void _game_exec(game_t* game, uint32_t ms) {
     (void)game;
-    _state->_sys._elapsed += ms;
-    if(_state->_sys._sleep) {
-        if(ms > _state->_sys._sleep) {
-            _state->_sys._sleep = 0;
+    game->elapsed += ms;
+    if(game->sleep) {
+        if(ms > game->sleep) {
+            game->sleep = 0;
         } else {
-            _state->_sys._sleep -= ms;
+            game->sleep -= ms;
         }
         return;
     }
@@ -2323,7 +2302,7 @@ void _game_exec(game_t* game, uint32_t ms) {
         _game_audio_update(game, num_samples);
     }
 
-    _state->_sys._sleep += 16;
+    game->sleep += 16;
 }
 
 void game_exec(game_t* game, uint32_t ms) {
@@ -2345,7 +2324,6 @@ void game_cleanup(game_t* game) {
     GAME_ASSERT(game && game->valid);
     (void)game;
     _game_audio_stop_all(game);
-    delete _state;
 }
 
 gfx_display_info_t game_display_info(game_t* game) {
@@ -2379,10 +2357,10 @@ gfx_display_info_t game_display_info(game_t* game) {
 void game_key_down(game_t* game, game_input_t input) {
     (void)game;
     switch(input) {
-        case GAME_INPUT_LEFT:   game->input.dirMask |= PlayerInput::DIR_LEFT; break;
-        case GAME_INPUT_RIGHT:  game->input.dirMask |= PlayerInput::DIR_RIGHT; break;
-        case GAME_INPUT_UP:     game->input.dirMask |= PlayerInput::DIR_UP; break;
-        case GAME_INPUT_DOWN:   game->input.dirMask |= PlayerInput::DIR_DOWN; break;
+        case GAME_INPUT_LEFT:   game->input.dirMask |= DIR_LEFT; break;
+        case GAME_INPUT_RIGHT:  game->input.dirMask |= DIR_RIGHT; break;
+        case GAME_INPUT_UP:     game->input.dirMask |= DIR_UP; break;
+        case GAME_INPUT_DOWN:   game->input.dirMask |= DIR_DOWN; break;
         case GAME_INPUT_JUMP:   game->input.jump = true; break;
         case GAME_INPUT_ACTION: game->input.action = true; break;
         case GAME_INPUT_BACK:   game->input.back = true; break;
@@ -2394,10 +2372,10 @@ void game_key_down(game_t* game, game_input_t input) {
 void game_key_up(game_t* game, game_input_t input) {
     (void)game;
     switch(input) {
-        case GAME_INPUT_LEFT:   game->input.dirMask &= ~PlayerInput::DIR_LEFT; break;
-        case GAME_INPUT_RIGHT:  game->input.dirMask &= ~PlayerInput::DIR_RIGHT; break;
-        case GAME_INPUT_UP:     game->input.dirMask &= ~PlayerInput::DIR_UP; break;
-        case GAME_INPUT_DOWN:   game->input.dirMask &= ~PlayerInput::DIR_DOWN; break;
+        case GAME_INPUT_LEFT:   game->input.dirMask &= ~DIR_LEFT; break;
+        case GAME_INPUT_RIGHT:  game->input.dirMask &= ~DIR_RIGHT; break;
+        case GAME_INPUT_UP:     game->input.dirMask &= ~DIR_UP; break;
+        case GAME_INPUT_DOWN:   game->input.dirMask &= ~DIR_DOWN; break;
         case GAME_INPUT_JUMP:   game->input.jump = false; break;
         case GAME_INPUT_ACTION: game->input.action = false; break;
         case GAME_INPUT_BACK:   game->input.back = false; break;
