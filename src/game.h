@@ -41,15 +41,15 @@ extern "C" {
 #define GAME_DBG_PAK                    (1 << 6)
 #define GAME_DBG_RESOURCE               (1 << 7)
 
-#define GAME_PART_COPY_PROTECTION    16000
-#define GAME_PART_INTRO              16001
-#define GAME_PART_WATER              16002
-#define GAME_PART_PRISON             16003
-#define GAME_PART_CITE               16004
-#define GAME_PART_ARENE              16005
-#define GAME_PART_LUXE               16006
-#define GAME_PART_FINAL              16007
-#define GAME_PART_PASSWORD           16008
+#define GAME_PART_COPY_PROTECTION       (16000)
+#define GAME_PART_INTRO                 (16001)
+#define GAME_PART_WATER                 (16002)
+#define GAME_PART_PRISON                (16003)
+#define GAME_PART_CITE                  (16004)
+#define GAME_PART_ARENE                 (16005)
+#define GAME_PART_LUXE                  (16006)
+#define GAME_PART_FINAL                 (16007)
+#define GAME_PART_PASSWORD              (16008)
 
 #define GAME_QUAD_STRIP_MAX_VERTICES (70)
 

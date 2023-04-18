@@ -49,7 +49,7 @@ typedef struct {
     bool open;
     ui_dbg_texture_callbacks_t texture_cbs;
     void* tex_fb[4];
-    uint32_t pixel_buffer[320*200];
+    uint32_t pixel_buffer[GAME_WIDTH*GAME_HEIGHT];
 } ui_game_video_t;
 
 typedef struct {
@@ -57,7 +57,7 @@ typedef struct {
     int w, h;
     bool open;
     void* tex_bmp;
-    uint8_t buf[320*200*4];
+    uint8_t buf[GAME_WIDTH*GAME_HEIGHT*4];
     int selected;
 } ui_game_res_t;
 
@@ -138,10 +138,10 @@ static void _ui_game_draw_menu(ui_game_t* ui) {
 
 static void _ui_game_update_fbs(ui_game_t* ui) {
     for(int i=0; i<4; i++) {
-        for(int j=0; j<320*200; j++) {
+        for(int j=0; j<GAME_WIDTH*GAME_HEIGHT; j++) {
             ui->video.pixel_buffer[j] = ui->game->gfx.palette[ui->game->gfx.fbs[i].buffer[j]];
         }
-        ui->video.texture_cbs.update_cb(ui->video.tex_fb[i], ui->video.pixel_buffer, 320*200*sizeof(uint32_t));
+        ui->video.texture_cbs.update_cb(ui->video.tex_fb[i], ui->video.pixel_buffer, GAME_WIDTH*GAME_HEIGHT*sizeof(uint32_t));
     }
 }
 
@@ -225,9 +225,9 @@ inline uint16_t _read_be_uint16(const void *ptr) {
 }
 
 static void decode_amiga(const uint8_t *src, uint32_t *dst, uint32_t pal[16]) {
-	static const int plane_size = 200 * 320 / 8;
-	for (int y = 0; y < 200; ++y) {
-		for (int x = 0; x < 320; x += 8) {
+	static const int plane_size = GAME_WIDTH * GAME_HEIGHT / 8;
+	for (int y = 0; y < GAME_HEIGHT; ++y) {
+		for (int x = 0; x < GAME_WIDTH; x += 8) {
 			for (int b = 0; b < 8; ++b) {
 				const int mask = 1 << (7 - b);
 				uint8_t color = 0;
@@ -306,12 +306,12 @@ static void _ui_game_draw_sel_res(ui_game_t* ui) {
         }
     } else if(e->type == RT_BITMAP) {
         uint32_t pal[16];
-        uint8_t buffer[320*200/2];
+        uint8_t buffer[GAME_WIDTH*GAME_HEIGHT/2];
         _ui_game_get_pal_for_res(ui, ui->res.selected, pal);
         if(game_get_res_buf(ui->game, ui->res.selected, buffer)) {
             decode_amiga(buffer, (uint32_t*)ui->res.buf, pal);
-            ui->video.texture_cbs.update_cb(ui->res.tex_bmp, ui->res.buf, 320*200*sizeof(uint32_t));
-            ImGui::Image(ui->res.tex_bmp, ImVec2(320, 200));
+            ui->video.texture_cbs.update_cb(ui->res.tex_bmp, ui->res.buf, GAME_WIDTH*GAME_HEIGHT*sizeof(uint32_t));
+            ImGui::Image(ui->res.tex_bmp, ImVec2(GAME_WIDTH, GAME_HEIGHT));
         } else {
             ImGui::Text("Not available");
         }
@@ -396,7 +396,7 @@ static void _ui_game_draw_video(ui_game_t* ui) {
         if (ImGui::CollapsingHeader("Frame buffers", ImGuiTreeNodeFlags_DefaultOpen)) {
             _ui_game_update_fbs(ui);
             for(int i=0; i<4; i++) {
-                ImGui::Image(ui->video.tex_fb[i], ImVec2(320, 200));
+                ImGui::Image(ui->video.tex_fb[i], ImVec2(GAME_WIDTH, GAME_HEIGHT));
                 if (i != 1) {
                     ImGui::SameLine();
                 }
@@ -437,7 +437,7 @@ void ui_game_init(ui_game_t* ui, const ui_game_desc_t* ui_desc) {
         ui->video.w = 562;
         ui->video.h = 568;
         for(int i=0; i<4; i++) {
-            ui->video.tex_fb[i] = ui->video.texture_cbs.create_cb(320, 200);
+            ui->video.tex_fb[i] = ui->video.texture_cbs.create_cb(GAME_WIDTH, GAME_HEIGHT);
         }
     }
     {
@@ -466,7 +466,7 @@ void ui_game_init(ui_game_t* ui, const ui_game_desc_t* ui_desc) {
             x += dx; y += dy;
         }
     }
-    ui->res.tex_bmp = ui->video.texture_cbs.create_cb(320, 200);
+    ui->res.tex_bmp = ui->video.texture_cbs.create_cb(GAME_WIDTH, GAME_HEIGHT);
 }
 
 void ui_game_discard(ui_game_t* ui) {
