@@ -6,11 +6,10 @@ extern "C" {
 
 #define GAME_WIDTH                      (320)
 #define GAME_HEIGHT                     (200)
-#define GAME_DEFAULT_AUDIO_SAMPLE_RATE  (44100)
-#define GAME_DEFAULT_AUDIO_SAMPLES      (128)        // default number of samples in internal sample buffer
-#define GAME_MAX_AUDIO_SAMPLES          (2048*16)        // max number of audio samples in internal sample buffer
+
 #define GAME_ENTRIES_COUNT_20TH         (178)
 #define GAME_MEM_BLOCK_SIZE             (1 * 1024 * 1024)
+
 #define GAME_RES_STATUS_NULL            (0)
 #define GAME_RES_STATUS_LOADED          (1)
 #define GAME_RES_STATUS_TOLOAD          (2)
@@ -32,12 +31,7 @@ extern "C" {
 #define GAME_MIX_BUF_SIZE               (4096*8)
 #define GAME_MIX_CHANNELS               (4)
 #define GAME_SFX_NUM_CHANNELS           (4)
-#define GAME_PAULA_FREQ                 (7159092)
-
-#define GAME_FIXUP_PALETTE_REDRAW       (1) // redraw all primitives on setPal script call
-
-#define GAME_FRAC_BITS                  (16)
-#define GAME_FRAC_MASK                  ((1 << GAME_FRAC_BITS) - 1)
+#define GAME_MAX_AUDIO_SAMPLES          (2048*16)    // max number of audio samples in internal sample buffer
 
 #define GAME_DBG_SCRIPT                 (1 << 0)
 #define GAME_DBG_BANK                   (1 << 1)
@@ -58,20 +52,6 @@ extern "C" {
 #define GAME_PART_PASSWORD           16008
 
 #define GAME_QUAD_STRIP_MAX_VERTICES (70)
-
-typedef struct {
-	int16_t x, y;
-} game_point_t;
-
-typedef struct {
-	uint8_t numVertices;
-	game_point_t vertices[GAME_QUAD_STRIP_MAX_VERTICES];
-} game_quad_strip_t;
-
-typedef struct {
-	uint32_t inc;
-	uint64_t offset;
-} game_frac_t;
 
 typedef enum  {
 	GAME_LANG_FR,
@@ -109,17 +89,17 @@ typedef enum {
     DT_ATARI_DEMO, // ST Action Issue44 Disk28
 } game_data_type_t;
 
-typedef struct {
-	uint8_t *data;
-	uint16_t volume;
-} game_audio_sfx_instrument_t;
-
 typedef enum {
     DIR_LEFT  = 1 << 0,
     DIR_RIGHT = 1 << 1,
     DIR_UP    = 1 << 2,
     DIR_DOWN  = 1 << 3
 } game_input_dir_t;
+
+typedef struct {
+	uint8_t *data;
+	uint16_t volume;
+} game_audio_sfx_instrument_t;
 
 typedef struct {
 	uint16_t    note_1;
@@ -140,6 +120,11 @@ typedef struct {
 	uint8_t*                    order_table;
 	game_audio_sfx_instrument_t samples[15];
 } game_audio_sfx_module_t;
+
+typedef struct {
+	uint32_t inc;
+	uint64_t offset;
+} game_frac_t;
 
 typedef struct  {
 	uint8_t*    sample_data;
@@ -184,18 +169,18 @@ typedef struct {
 } game_desc_t;
 
 typedef struct {
-    uint8_t buffer[320*200];
+    uint8_t buffer[GAME_WIDTH*GAME_HEIGHT];
 } game_framebuffer_t;
 
 typedef struct {
 	uint8_t     status;        // 0x0
 	uint8_t     type;          // 0x1, Resource::ResType
-	uint8_t*    bufPtr;        // 0x2
-	uint8_t     rankNum;       // 0x6
-	uint8_t     bankNum;       // 0x7
-	uint32_t    bankPos;       // 0x8
-	uint32_t    packedSize;    // 0xC
-	uint32_t    unpackedSize;  // 0x12
+	uint8_t*    buf_ptr;        // 0x2
+	uint8_t     rank_num;       // 0x6
+	uint8_t     bank_num;       // 0x7
+	uint32_t    bank_pos;       // 0x8
+	uint32_t    packed_size;    // 0xC
+	uint32_t    unpacked_size;  // 0x12
 } game_mem_entry_t;
 
 // TODO: rename this
@@ -233,20 +218,20 @@ typedef struct {
 } game_res_t;
 
 typedef struct {
-    bool            valid;
-    game_debug_t    debug;
-    game_res_t      res;
-    int             part_num;
-    uint32_t        elapsed;
-    uint32_t        sleep;
+    bool                    valid;
+    game_debug_t            debug;
+    game_res_t              res;
+    const game_str_entry_t* strings_table;
+    int                     part_num;
+    uint32_t                elapsed;
+    uint32_t                sleep;
 
     struct {
         uint8_t             fb[GAME_WIDTH*GAME_HEIGHT];    // frame buffer: this where is stored the image with indexed color
-        game_framebuffer_t  fbs[4];         // frame buffer: this where is stored the image with indexed color
+        game_framebuffer_t  fbs[4];
         uint32_t            palette[16];    // palette containing 16 RGBA colors
         uint8_t*            draw_page_ptr;
-        int                 u, v;
-        int                 fix_up_palette;
+        bool                fix_up_palette; // redraw all primitives on setPal script call
     } gfx;
 
     struct {
@@ -262,9 +247,7 @@ typedef struct {
         uint8_t                 buffers[3];
         game_pc_t               p_data;
         uint8_t*                data_buf;
-        const game_str_entry_t* strings_table;
         bool                    use_ega;
-        uint8_t                 temp_bitmap[GAME_WIDTH * GAME_HEIGHT];
     } video;
 
     struct {

@@ -1,5 +1,5 @@
 /*
-   UI implementation for nes.c, this must live in a .cc file.
+   UI implementation for raw.c, this must live in a .cc file.
 */
 #include <stdint.h>
 #include <stdbool.h>

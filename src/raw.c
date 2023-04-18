@@ -49,7 +49,7 @@ static void ui_draw_cb(void) {
 
 static void app_init(void) {
     game_init(&state.game, &(game_desc_t){
-        .part_num = 16001,
+        .part_num = GAME_PART_INTRO,
         .demo3_joy_inputs = true,
         .lang = GAME_LANG_US,
         .audio = {

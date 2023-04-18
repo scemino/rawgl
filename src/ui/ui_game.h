@@ -359,9 +359,9 @@ static void _ui_game_draw_resources(ui_game_t* ui) {
                 }
 
                 ImGui::TableNextColumn();
-                ImGui::Text("%02X", e->bankNum); ImGui::TableNextColumn();
-                ImGui::Text("%s", _convert_size(e->packedSize, status_text, 256)); ImGui::TableNextColumn();
-                ImGui::Text("%s", _convert_size(e->unpackedSize, status_text, 256));
+                ImGui::Text("%02X", e->bank_num); ImGui::TableNextColumn();
+                ImGui::Text("%s", _convert_size(e->packed_size, status_text, 256)); ImGui::TableNextColumn();
+                ImGui::Text("%s", _convert_size(e->unpacked_size, status_text, 256));
                 ImGui::PopID();
             }
             ImGui::EndTable();
