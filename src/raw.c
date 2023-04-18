@@ -15,6 +15,7 @@
 #include "gfx.h"
 #include "common.h"
 #include "game.h"
+#include "raw-data.h"
 #if defined(GAME_USE_UI)
     #include "ui.h"
     #include "ui/raw-dasm.h"
@@ -49,9 +50,18 @@ static void ui_draw_cb(void) {
 
 static void app_init(void) {
     game_init(&state.game, &(game_desc_t){
-        .part_num = GAME_PART_INTRO,
-        .demo3_joy_inputs = true,
+        .part_num = GAME_PART_WATER,
+        .demo3_joy = dump_DEMO3_JOY,
+        .demo3_joy_size = sizeof(dump_DEMO3_JOY),
         .lang = GAME_LANG_US,
+        .data = {
+            .mem_list = dump_MEMLIST_BIN,
+            .banks[0x0] = dump_BANK01,
+            .banks[0x1] = dump_BANK02,
+            .banks[0x4] = dump_BANK05,
+            .banks[0x5] = dump_BANK06,
+            .banks[0xc] = dump_BANK0D,
+        },
         .audio = {
             .callback = { .func = push_audio },
             .sample_rate = saudio_sample_rate()

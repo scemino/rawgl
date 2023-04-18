@@ -157,15 +157,21 @@ typedef struct {
     float volume;
 } game_audio_desc_t;
 
+typedef struct {
+    const uint8_t*  mem_list;
+    const uint8_t*  banks[0xd];
+} game_data_t;
+
 // configuration parameters for game_init()
 typedef struct {
-    const char *data_dir;       // the directory where the game files are located
-    int part_num;               // indicates the part number where the fame starts
-    bool use_ega;               // true to use EGA palette, false to use VGA palette
-    game_lang_t lang;           // language to use
-    bool demo3_joy_inputs;      // read the demo3.joy file if present
-    game_audio_desc_t audio;
-    game_debug_t debug;
+    int                 part_num;               // indicates the part number where the fame starts
+    bool                use_ega;                // true to use EGA palette, false to use VGA palette
+    game_lang_t         lang;                   // language to use
+    const uint8_t*      demo3_joy;              // contains content of demo3.joy file if present
+    size_t              demo3_joy_size;
+    game_audio_desc_t   audio;
+    game_debug_t        debug;
+    game_data_t         data;
 } game_desc_t;
 
 typedef struct {
@@ -214,6 +220,7 @@ typedef struct {
 	uint8_t*            seg_video2;
 	bool                has_password_screen;
 	game_data_type_t    data_type;
+    game_data_t         data;
 	game_lang_t         lang;
 } game_res_t;
 
@@ -271,6 +278,14 @@ typedef struct {
         bool    quit;
         bool    back;
         char    last_char;
+
+        struct {
+            uint8_t         keymask;
+            uint8_t         counter;
+
+            const uint8_t*  buf_ptr;
+            int             buf_pos, buf_size;
+        } demo_joy;
     } input;
 
     const char* title;      // title of the game

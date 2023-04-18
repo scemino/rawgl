@@ -9,7 +9,6 @@
 #include "common.h"
 #include "game.h"
 #include "sokol_audio.h"
-#include "raw-data.h"
 
 #define _GFX_COL_ALPHA (0x10) // transparent pixel (OR'ed with 0x8)
 #define _GFX_COL_PAGE  (0x11) // buffer 0 pixel
@@ -1462,7 +1461,7 @@ static void _game_res_read_entries(game_t* game) {
 	case DT_DOS: {
 			game->res.has_password_screen = false; // DOS demo versions do not have the resources
             game_mem_entry_t *me = game->res.mem_list;
-            uint8_t* p = dump_MEMLIST_BIN;
+            uint8_t* p = game->res.data.mem_list;
             while (1) {
                 GAME_ASSERT(game->res.num_mem_list < _ARRAYSIZE(game->res.mem_list));
                 me->status = read_byte(&p);
@@ -1628,27 +1627,10 @@ static bool _bytekiller_unpack(uint8_t *dst, int dstSize, const uint8_t *src, in
 
 
 static bool _game_res_read_bank(game_t* game, const game_mem_entry_t *me, uint8_t *dstBuf) {
-    (void)game;
-	static uint8_t* banks[] = {
-        dump_BANK01,
-        dump_BANK02,
-        NULL,
-        NULL,
-        dump_BANK05,
-        dump_BANK06,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        dump_BANK0D
-    };
-
-    if(me->bank_num > 0xd || banks[me->bank_num-1] == NULL)
+    if(me->bank_num > 0xd || game->res.data.banks[me->bank_num-1] == NULL)
         return false;
 
-    memcpy(dstBuf, banks[me->bank_num-1] + me->bank_pos, me->packed_size);
+    memcpy(dstBuf, game->res.data.banks[me->bank_num-1] + me->bank_pos, me->packed_size);
     if (me->packed_size != me->unpacked_size) {
         return _bytekiller_unpack(dstBuf, me->unpacked_size, dstBuf, me->packed_size);
     }
@@ -1699,7 +1681,7 @@ static void _game_res_load(game_t* game) {
 			warning("Resource::load() ec=0x%X (me->bank_num == 0)", 0xF00);
 			me->status = GAME_RES_STATUS_NULL;
 		} else {
-			debug(GAME_DBG_BANK, "Resource::load() bufPos=0x%X size=%d type=%d pos=0x%X bank_num=%d", memPtr - game->res.mem, me->packed_size, me->type, me->bank_pos, me->bank_num);
+			debug(GAME_DBG_BANK, "Resource::load() buf_pos=0x%X size=%d type=%d pos=0x%X bank_num=%d", memPtr - game->res.mem, me->packed_size, me->type, me->bank_pos, me->bank_num);
 			if (_game_res_read_bank(game, me, memPtr)) {
 				if (me->type == RT_BITMAP) {
 					_game_video_copy_bitmap_ptr(game, game->res.vid_cur_ptr);
@@ -2226,6 +2208,36 @@ static const _opcode_func _opTable[] = {
 	&_op_playMusic
 };
 
+// Demo3 joy
+static void _demo3_joy_read(game_t* game, const uint8_t* buf_ptr, size_t demo3_joy_size) {
+    game->input.demo_joy.buf_ptr = buf_ptr;
+    game->input.demo_joy.buf_size = demo3_joy_size;
+    game->input.demo_joy.buf_pos = -1;
+}
+
+bool _demo3_joy_start(game_t* game) {
+    if (game->input.demo_joy.buf_size > 0) {
+        game->input.demo_joy.keymask = game->input.demo_joy.buf_ptr[0];
+        game->input.demo_joy.counter = game->input.demo_joy.buf_ptr[1];
+        game->input.demo_joy.buf_pos = 2;
+        return true;
+    }
+    return false;
+}
+
+uint8_t _demo3_joy_update(game_t* game) {
+    if (game->input.demo_joy.buf_pos >= 0 && game->input.demo_joy.buf_pos < game->input.demo_joy.buf_size) {
+        if (game->input.demo_joy.counter == 0) {
+            game->input.demo_joy.keymask = game->input.demo_joy.buf_ptr[game->input.demo_joy.buf_pos++];
+            game->input.demo_joy.counter = game->input.demo_joy.buf_ptr[game->input.demo_joy.buf_pos++];
+        } else {
+            --game->input.demo_joy.counter;
+        }
+        return game->input.demo_joy.keymask;
+    }
+    return 0;
+}
+
 // VM
 static void _game_vm_restart_at(game_t* game, int part, int pos) {
     _game_audio_stop_all(game);
@@ -2254,10 +2266,9 @@ static void _game_vm_restart_at(game_t* game, int part, int pos) {
 	}
 	game->vm.start_time = game->vm.time_stamp = game->elapsed;
 	if (part == GAME_PART_WATER) {
-        // TODO:
-		// if (game->res._demo3Joy.start()) {
-		// 	memset(game->vm.vars, 0, sizeof(game->vm.vars));
-		// }
+        if (_demo3_joy_start(game)) {
+			memset(game->vm.vars, 0, sizeof(game->vm.vars));
+		}
 	}
 }
 
@@ -2318,27 +2329,26 @@ static void _game_vm_update_input(game_t* game) {
 	game->vm.vars[GAME_VAR_HERO_ACTION] = action;
 	game->vm.vars[GAME_VAR_HERO_ACTION_POS_MASK] = m;
 	if (game->res.current_part == GAME_PART_WATER) {
-        // TODO:
-		// const uint8_t mask = game->res._demo3Joy.update();
-		// if (mask != 0) {
-		// 	game->vm.vars[GAME_VAR_HERO_ACTION_POS_MASK] = mask;
-		// 	game->vm.vars[GAME_VAR_HERO_POS_MASK] = mask & 15;
-		// 	game->vm.vars[GAME_VAR_HERO_POS_LEFT_RIGHT] = 0;
-		// 	if (mask & 1) {
-		// 		game->vm.vars[GAME_VAR_HERO_POS_LEFT_RIGHT] = 1;
-		// 	}
-		// 	if (mask & 2) {
-		// 		game->vm.vars[GAME_VAR_HERO_POS_LEFT_RIGHT] = -1;
-		// 	}
-		// 	game->vm.vars[GAME_VAR_HERO_POS_JUMP_DOWN] = 0;
-		// 	if (mask & 4) {
-		// 		game->vm.vars[GAME_VAR_HERO_POS_JUMP_DOWN] = 1;
-		// 	}
-		// 	if (mask & 8) {
-		// 		game->vm.vars[GAME_VAR_HERO_POS_JUMP_DOWN] = -1;
-		// 	}
-		// 	game->vm.vars[GAME_VAR_HERO_ACTION] = (mask >> 7);
-		// }
+		const uint8_t mask = _demo3_joy_update(game);
+		if (mask != 0) {
+			game->vm.vars[GAME_VAR_HERO_ACTION_POS_MASK] = mask;
+			game->vm.vars[GAME_VAR_HERO_POS_MASK] = mask & 15;
+			game->vm.vars[GAME_VAR_HERO_POS_LEFT_RIGHT] = 0;
+			if (mask & 1) {
+				game->vm.vars[GAME_VAR_HERO_POS_LEFT_RIGHT] = 1;
+			}
+			if (mask & 2) {
+				game->vm.vars[GAME_VAR_HERO_POS_LEFT_RIGHT] = -1;
+			}
+			game->vm.vars[GAME_VAR_HERO_POS_JUMP_DOWN] = 0;
+			if (mask & 4) {
+				game->vm.vars[GAME_VAR_HERO_POS_JUMP_DOWN] = 1;
+			}
+			if (mask & 8) {
+				game->vm.vars[GAME_VAR_HERO_POS_JUMP_DOWN] = -1;
+			}
+			game->vm.vars[GAME_VAR_HERO_ACTION] = (mask >> 7);
+		}
 	}
 }
 
@@ -2433,6 +2443,7 @@ void game_init(game_t* game, const game_desc_t* desc) {
     memset(game, 0, sizeof(game_t));
     game->valid = true;
     game->debug = desc->debug;
+    game->res.data = desc->data;
 
     g_debugMask = GAME_DBG_INFO | GAME_DBG_VIDEO | GAME_DBG_SND | GAME_DBG_SCRIPT | GAME_DBG_BANK;
     game->part_num = desc->part_num;
@@ -2446,10 +2457,9 @@ void game_init(game_t* game, const game_desc_t* desc) {
 
     _game_gfx_set_work_page_ptr(game, 2);
 
-    // TODO:
-    // if (desc->demo3_joy_inputs && game->res.data_type == DT_DOS) {
-	// 	game->res.readDemo3Joy();
-	// }
+    if (desc->demo3_joy_size && game->res.data_type == DT_DOS) {
+		_demo3_joy_read(game, desc->demo3_joy, desc->demo3_joy_size);
+	}
 
     switch (game->res.data_type) {
     case DT_DOS:
