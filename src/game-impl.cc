@@ -1,15 +1,15 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <cstdarg>
+#include <cstdio>
+#include <cstring>
+#include <cstdlib>
 #include "gfx.h"
 #include "common.h"
 #include "game.h"
 #include "sokol_audio.h"
-#include "util.h"
-#include "file.h"
 #include "raw-data.h"
-#include "unpack.h"
-#include "bitmap.h"
 
 #define _GFX_COL_ALPHA (0x10) // transparent pixel (OR'ed with 0x8)
 #define _GFX_COL_PAGE  (0x11) // buffer 0 pixel
@@ -18,6 +18,10 @@
 #define _GFX_FMT_RGB555     (1)
 #define _GFX_FMT_RGB        (2)
 #define _GFX_FMT_RGBA       (3)
+
+#define _MIN(v1, v2) ((v1 < v2) ? v1 : v2)
+#define _MAX(v1, v2) ((v1 > v2) ? v1 : v2)
+#define _SWAP(x, y, T) do { T SWAP = x; x = y; y = SWAP; } while (0)
 
 typedef void (*_gfx_draw_line_t)(game_t* game, int16_t x1, int16_t x2, int16_t y, uint8_t col);
 
@@ -426,6 +430,7 @@ const uint8_t _mem_list_parts[][4] = {
 
 static const char *_kGameTitleEU = "Another World";
 static const char *_kGameTitleUS = "Out Of This World";
+static uint16_t g_debugMask;
 
 typedef void (*_opcode_func)(game_t* game);
 
@@ -439,12 +444,62 @@ extern "C" {
 #endif
 
 #define _GAME_DEFAULT(val,def) (((val) != 0) ? (val) : (def))
+#define _ARRAYSIZE(a) (sizeof(a)/sizeof(a[0]))
 
-uint8_t fetchByte(game_pc_t* ptr) {
+static void debug(uint16_t cm, const char *msg, ...) {
+	char buf[1024];
+	if (cm & g_debugMask) {
+		va_list va;
+		va_start(va, msg);
+		vsnprintf(buf, 1024, msg, va);
+		va_end(va);
+		printf("%s\n", buf);
+		fflush(stdout);
+	}
+}
+
+static void error(const char *msg, ...) {
+	char buf[1024];
+	va_list va;
+	va_start(va, msg);
+	vsnprintf(buf, 1024, msg, va);
+	va_end(va);
+	fprintf(stderr, "ERROR: %s!\n", buf);
+	exit(-1);
+}
+
+static void warning(const char *msg, ...) {
+	char buf[1024];
+	va_list va;
+	va_start(va, msg);
+	vsnprintf(buf, 1024, msg, va);
+	va_end(va);
+	fprintf(stderr, "WARNING: %s!\n", buf);
+}
+
+static inline uint16_t READ_BE_UINT16(const void *ptr) {
+	const uint8_t *b = (const uint8_t *)ptr;
+	return (b[0] << 8) | b[1];
+}
+
+static inline uint16_t READ_LE_UINT16(const uint8_t *ptr) {
+	return (ptr[1] << 8) | ptr[0];
+}
+
+inline uint32_t READ_BE_UINT32(const void *ptr) {
+	const uint8_t *b = (const uint8_t *)ptr;
+	return (b[0] << 24) | (b[1] << 16) | (b[2] << 8) | b[3];
+}
+
+static inline uint32_t READ_LE_UINT32(const uint8_t *ptr) {
+	return (ptr[3] << 24) | (ptr[2] << 16) | (ptr[1] << 8) | ptr[0];
+}
+
+static uint8_t fetchByte(game_pc_t* ptr) {
     return *ptr->pc++;
 }
 
-uint16_t fetchWord(game_pc_t* ptr) {
+static uint16_t fetchWord(game_pc_t* ptr) {
     const uint16_t i = READ_BE_UINT16(ptr->pc);
     ptr->pc += 2;
     return i;
@@ -462,25 +517,25 @@ static const char* _find_string(const game_str_entry_t* strings_table, int id) {
 // Frac
 
 void frac_reset(game_frac_t* frac, int n, int d) {
-    frac->inc = (((int64_t)n) << FRAC_BITS) / d;
+    frac->inc = (((int64_t)n) << GAME_FRAC_BITS) / d;
     frac->offset = 0;
 }
 
 uint32_t frac_get_int(game_frac_t* frac) {
-    return frac->offset >> FRAC_BITS;
+    return frac->offset >> GAME_FRAC_BITS;
 }
 uint32_t frac_get_frac(game_frac_t* frac) {
-    return frac->offset & FRAC_MASK;
+    return frac->offset & GAME_FRAC_MASK;
 }
 int frac_interpolate(game_frac_t* frac, int sample1, int sample2) {
     const int fp = frac_get_frac(frac);
-    return (sample1 * (FRAC_MASK - fp) + sample2 * fp) >> FRAC_BITS;
+    return (sample1 * (GAME_FRAC_MASK - fp) + sample2 * fp) >> GAME_FRAC_BITS;
 }
 
 // SFX Player
 
 static void _game_audio_sfx_set_events_delay(game_t* game, uint16_t delay) {
-	debug(DBG_SND, "SfxPlayer::setEventsDelay(%d)", delay);
+	debug(GAME_DBG_SND, "SfxPlayer::setEventsDelay(%d)", delay);
 	game->audio.sfx_player.delay = delay;
 }
 
@@ -495,7 +550,7 @@ static void _game_audio_sfx_prepare_instruments(game_t* game, const uint8_t* p) 
 			game_mem_entry_t *me = &game->res.mem_list[resNum];
 			if (me->status == GAME_RES_STATUS_LOADED && me->type == RT_SOUND) {
 				ins->data = me->bufPtr;
-				debug(DBG_SND, "Loaded instrument 0x%X n=%d volume=%d", resNum, i, ins->volume);
+				debug(GAME_DBG_SND, "Loaded instrument 0x%X n=%d volume=%d", resNum, i, ins->volume);
 			} else {
 				error("Error loading instrument 0x%X", resNum);
 			}
@@ -505,14 +560,14 @@ static void _game_audio_sfx_prepare_instruments(game_t* game, const uint8_t* p) 
 }
 
 static void _game_audio_sfx_load_module(game_t* game, uint16_t resNum, uint16_t delay, uint8_t pos) {
-	debug(DBG_SND, "SfxPlayer::loadSfxModule(0x%X, %d, %d)", resNum, delay, pos);
+	debug(GAME_DBG_SND, "SfxPlayer::loadSfxModule(0x%X, %d, %d)", resNum, delay, pos);
     game_audio_sfx_player_t* player = &game->audio.sfx_player;
 	game_mem_entry_t *me = &game->res.mem_list[resNum];
 	if (me->status == GAME_RES_STATUS_LOADED && me->type == RT_MUSIC) {
 		memset(&player->sfx_mod, 0, sizeof(game_audio_sfx_module_t));
 		player->sfx_mod.cur_order = pos;
 		player->sfx_mod.num_order = me->bufPtr[0x3F];
-		debug(DBG_SND, "SfxPlayer::loadSfxModule() curOrder = 0x%X numOrder = 0x%X", player->sfx_mod.cur_order, player->sfx_mod.num_order);
+		debug(GAME_DBG_SND, "SfxPlayer::loadSfxModule() curOrder = 0x%X numOrder = 0x%X", player->sfx_mod.cur_order, player->sfx_mod.num_order);
 		player->sfx_mod.order_table = me->bufPtr + 0x40;
 		if (delay == 0) {
 			player->delay = READ_BE_UINT16(me->bufPtr);
@@ -520,7 +575,7 @@ static void _game_audio_sfx_load_module(game_t* game, uint16_t resNum, uint16_t 
 			player->delay = delay;
 		}
 		player->sfx_mod.data = me->bufPtr + 0xC0;
-		debug(DBG_SND, "SfxPlayer::loadSfxModule() eventDelay = %d ms", player->delay);
+		debug(GAME_DBG_SND, "SfxPlayer::loadSfxModule() eventDelay = %d ms", player->delay);
 		_game_audio_sfx_prepare_instruments(game, me->bufPtr + 2);
 	} else {
 		warning("SfxPlayer::loadSfxModule() ec=0x%X", 0xF8);
@@ -543,13 +598,13 @@ static void _game_audio_sfx_mix_channel(int16_t* s, game_audio_sfx_channel_t* ch
 	if (ch->sample_len == 0) {
 		return;
 	}
-	int pos1 = ch->pos.offset >> Frac::BITS;
+	int pos1 = ch->pos.offset >> GAME_FRAC_BITS;
 	ch->pos.offset += ch->pos.inc;
 	int pos2 = pos1 + 1;
 	if (ch->sample_loop_len != 0) {
 		if (pos1 >= ch->sample_loop_pos + ch->sample_loop_len - 1) {
 			pos2 = ch->sample_loop_pos;
-			ch->pos.offset = pos2 << Frac::BITS;
+			ch->pos.offset = pos2 << GAME_FRAC_BITS;
 		}
 	} else {
 		if (pos1 >= ch->sample_len - 1) {
@@ -563,15 +618,9 @@ static void _game_audio_sfx_mix_channel(int16_t* s, game_audio_sfx_channel_t* ch
 }
 
 static void _game_audio_sfx_start(game_t* game) {
-	debug(DBG_SND, "SfxPlayer::start()");
+	debug(GAME_DBG_SND, "SfxPlayer::start()");
     game_audio_sfx_player_t* player = &game->audio.sfx_player;
 	player->sfx_mod.cur_pos = 0;
-}
-
-static void _game_audio_sfx_stop(game_t* game) {
-	debug(DBG_SND, "SfxPlayer::stop()");
-    game_audio_sfx_player_t* player = &game->audio.sfx_player;
-	player->playing = false;
 }
 
 static void _game_audio_sfx_handle_pattern(game_t* game, uint8_t channel, const uint8_t *data) {
@@ -585,7 +634,7 @@ static void _game_audio_sfx_handle_pattern(game_t* game, uint8_t channel, const 
 		if (sample != 0) {
 			uint8_t *ptr = player->sfx_mod.samples[sample - 1].data;
 			if (ptr != 0) {
-				debug(DBG_SND, "SfxPlayer::handlePattern() preparing sample %d", sample);
+				debug(GAME_DBG_SND, "SfxPlayer::handlePattern() preparing sample %d", sample);
 				pat.sample_volume = player->sfx_mod.samples[sample - 1].volume;
 				pat.sample_start = 8;
 				pat.sample_buffer = ptr;
@@ -619,15 +668,15 @@ static void _game_audio_sfx_handle_pattern(game_t* game, uint8_t channel, const 
 		}
 	}
 	if (pat.note_1 == 0xFFFD) {
-		debug(DBG_SND, "SfxPlayer::handlePattern() _syncVar = 0x%X", pat.note_2);
-		game->vm.vars[VAR_MUSIC_SYNC] = pat.note_2;
+		debug(GAME_DBG_SND, "SfxPlayer::handlePattern() _syncVar = 0x%X", pat.note_2);
+		game->vm.vars[GAME_VAR_MUSIC_SYNC] = pat.note_2;
 	} else if (pat.note_1 == 0xFFFE) {
 		player->channels[channel].sample_len = 0;
 	} else if (pat.note_1 != 0 && pat.sample_buffer != 0) {
 		GAME_ASSERT(pat.note_1 >= 0x37 && pat.note_1 < 0x1000);
 		// convert Amiga period value to hz
-		const int freq = kPaulaFreq / (pat.note_1 * 2);
-		debug(DBG_SND, "SfxPlayer::handlePattern() adding sample freq = 0x%X", freq);
+		const int freq = GAME_PAULA_FREQ / (pat.note_1 * 2);
+		debug(GAME_DBG_SND, "SfxPlayer::handlePattern() adding sample freq = 0x%X", freq);
 		game_audio_sfx_channel_t* ch = &player->channels[channel];
 		ch->sample_data = pat.sample_buffer + pat.sample_start;
 		ch->sample_len = pat.sample_len;
@@ -635,7 +684,7 @@ static void _game_audio_sfx_handle_pattern(game_t* game, uint8_t channel, const 
 		ch->sample_loop_len = pat.loop_len;
 		ch->volume = pat.sample_volume;
 		ch->pos.offset = 0;
-		ch->pos.inc = (freq << Frac::BITS) / player->rate;
+		ch->pos.inc = (freq << GAME_FRAC_BITS) / player->rate;
 	}
 }
 
@@ -648,7 +697,7 @@ static void _game_audio_sfx_handle_events(game_t* game) {
 		patternData += 4;
 	}
 	player->sfx_mod.cur_pos += 4 * 4;
-	debug(DBG_SND, "SfxPlayer::handleEvents() order = 0x%X curPos = 0x%X", order, player->sfx_mod.cur_pos);
+	debug(GAME_DBG_SND, "SfxPlayer::handleEvents() order = 0x%X curPos = 0x%X", order, player->sfx_mod.cur_pos);
 	if (player->sfx_mod.cur_pos >= 1024) {
 		player->sfx_mod.cur_pos = 0;
 		order = player->sfx_mod.cur_order + 1;
@@ -664,7 +713,7 @@ static void _game_audio_sfx_mix_samples(game_t* game, int16_t* buf, int len) {
 	while (len != 0) {
 		if (player->samples_left == 0) {
             _game_audio_sfx_handle_events(game);
-			const int samplesPerTick = player->rate * (player->delay * 60 * 1000 / kPaulaFreq) / 1000;
+			const int samplesPerTick = player->rate * (player->delay * 60 * 1000 / GAME_PAULA_FREQ) / 1000;
 			player->samples_left = samplesPerTick;
 		}
 		int count = player->samples_left;
@@ -695,7 +744,6 @@ static void _game_audio_sfx_read_samples(game_t* game, int16_t *buf, int len) {
 
 static void _game_gfx_set_palette(game_t* game, const uint32_t *colors, int count) {
     GAME_ASSERT(count <= 16);
-	memcpy(game->gfx.pal, colors, sizeof(uint32_t) * count);
 	memcpy(game->gfx.palette, colors, sizeof(uint32_t) * count);
 }
 
@@ -730,8 +778,7 @@ static void _game_gfx_copy_buffer(game_t* game, int dst, int src, int vscroll) {
 
 static void _game_gfx_draw_buffer(game_t* game, int num) {
     const uint8_t *src = _game_gfx_get_page_ptr(game, num);
-    memcpy(game->gfx.color_buffer, src, GAME_WIDTH * GAME_HEIGHT);
-    memcpy(game->gfx.fb, game->gfx.color_buffer, GAME_WIDTH*GAME_HEIGHT);
+    memcpy(game->gfx.fb, src, GAME_WIDTH*GAME_HEIGHT);
 }
 
 static void _game_gfx_draw_char(game_t* game, uint8_t c, uint16_t x, uint16_t y, uint8_t color) {
@@ -751,7 +798,7 @@ static void _game_gfx_draw_char(game_t* game, uint8_t c, uint16_t x, uint16_t y,
 	}
 }
 
-static void _game_gfx_draw_string_char(game_t* game, int buffer, uint8_t color, char c, const Point *pt) {
+static void _game_gfx_draw_string_char(game_t* game, int buffer, uint8_t color, char c, const game_point_t *pt) {
 	_game_gfx_set_work_page_ptr(game, buffer);
 	_game_gfx_draw_char(game, c, pt->x, pt->y, color);
 }
@@ -773,12 +820,12 @@ static void _game_gfx_drawPoint(game_t* game, int16_t x, int16_t y, uint8_t colo
     }
 }
 
-static void _game_gfx_draw_point(game_t* game, int buffer, uint8_t color, const Point *pt) {
+static void _game_gfx_draw_point(game_t* game, int buffer, uint8_t color, const game_point_t *pt) {
 	_game_gfx_set_work_page_ptr(game, buffer);
 	_game_gfx_drawPoint(game, pt->x, pt->y, color);
 }
 
-static uint32_t _calc_step(const Point &p1, const Point &p2, uint16_t &dy) {
+static uint32_t _calc_step(const game_point_t &p1, const game_point_t &p2, uint16_t &dy) {
 	dy = p2.y - p1.y;
 	uint16_t delta = (dy <= 1) ? 1 : dy;
 	return ((p2.x - p1.x) * (0x4000 / delta)) << 2;
@@ -790,16 +837,16 @@ static void _game_gfx_draw_line_p(game_t* game, int16_t x1, int16_t x2, int16_t 
 	if (game->gfx.draw_page_ptr == game->gfx.fbs[0].buffer) {
 		return;
 	}
-	const int16_t xmax = MAX(x1, x2);
-	const int16_t xmin = MIN(x1, x2);
+	const int16_t xmax = _MAX(x1, x2);
+	const int16_t xmin = _MIN(x1, x2);
 	const int w = xmax - xmin + 1;
 	const int offset = (y * GAME_WIDTH + xmin);
 	memcpy(game->gfx.draw_page_ptr + offset, game->gfx.fbs[0].buffer + offset, w);
 }
 
 static void _game_gfx_draw_line_n(game_t* game, int16_t x1, int16_t x2, int16_t y, uint8_t color) {
-	const int16_t xmax = MAX(x1, x2);
-	const int16_t xmin = MIN(x1, x2);
+	const int16_t xmax = _MAX(x1, x2);
+	const int16_t xmin = _MIN(x1, x2);
 	const int w = xmax - xmin + 1;
 	const int offset = (y * GAME_WIDTH + xmin);
 	memset(game->gfx.draw_page_ptr + offset, color, w);
@@ -807,8 +854,8 @@ static void _game_gfx_draw_line_n(game_t* game, int16_t x1, int16_t x2, int16_t 
 
 static void _game_gfx_draw_line_trans(game_t* game, int16_t x1, int16_t x2, int16_t y, uint8_t color) {
     (void)color;
-	const int16_t xmax = MAX(x1, x2);
-	const int16_t xmin = MIN(x1, x2);
+	const int16_t xmax = _MAX(x1, x2);
+	const int16_t xmin = _MIN(x1, x2);
 	const int w = xmax - xmin + 1;
 	const int offset = (y * GAME_WIDTH + xmin);
 	for (int i = 0; i < w; ++i) {
@@ -824,15 +871,15 @@ static void _game_gfx_draw_bitmap(game_t* game, int buffer, const uint8_t *data,
 	warning("GraphicsSokol::drawBitmap() unhandled fmt %d w %d h %d", fmt, w, h);
 }
 
-static void _game_gfx_draw_polygon(game_t* game, uint8_t color, const QuadStrip &quadStrip) {
-	QuadStrip qs = quadStrip;
+static void _game_gfx_draw_polygon(game_t* game, uint8_t color, const game_quad_strip_t &quadStrip) {
+	game_quad_strip_t qs = quadStrip;
 
 	int i = 0;
 	int j = qs.numVertices - 1;
 
 	int16_t x2 = qs.vertices[i].x;
 	int16_t x1 = qs.vertices[j].x;
-	int16_t hliney = MIN(qs.vertices[i].y, qs.vertices[j].y);
+	int16_t hliney = _MIN(qs.vertices[i].y, qs.vertices[j].y);
 
 	++i;
 	--j;
@@ -892,7 +939,7 @@ static void _game_gfx_draw_polygon(game_t* game, uint8_t color, const QuadStrip 
 	}
 }
 
-static void _game_gfx_draw_quad_strip(game_t* game, int buffer, uint8_t color, const QuadStrip *qs) {
+static void _game_gfx_draw_quad_strip(game_t* game, int buffer, uint8_t color, const game_quad_strip_t *qs) {
 	_game_gfx_set_work_page_ptr(game, buffer);
 	_game_gfx_draw_polygon(game, color, *qs);
 }
@@ -967,17 +1014,17 @@ uint8_t _game_video_get_page_ptr(game_t* game, uint8_t page) {
 }
 
 static void _game_video_set_work_page_ptr(game_t* game, uint8_t page) {
-	debug(DBG_VIDEO, "Video::setWorkPagePtr(%d)", page);
+	debug(GAME_DBG_VIDEO, "Video::setWorkPagePtr(%d)", page);
 	game->video.buffers[0] = _game_video_get_page_ptr(game, page);
 }
 
 static void _game_video_fill_page(game_t* game, uint8_t page, uint8_t color) {
-	debug(DBG_VIDEO, "Video::fillPage(%d, %d)", page, color);
+	debug(GAME_DBG_VIDEO, "Video::fillPage(%d, %d)", page, color);
     _game_gfx_clear_buffer(game, _game_video_get_page_ptr(game, page), color);
 }
 
 static void _game_video_copy_page(game_t* game, uint8_t src, uint8_t dst, int16_t vscroll) {
-	debug(DBG_VIDEO, "Video::copyPage(%d, %d)", src, dst);
+	debug(GAME_DBG_VIDEO, "Video::copyPage(%d, %d)", src, dst);
 	if (src >= 0xFE || ((src &= ~0x40) & 0x80) == 0) { // no vscroll
         _game_gfx_copy_buffer(game, _game_video_get_page_ptr(game, dst), _game_video_get_page_ptr(game, src), 0);
 	} else {
@@ -990,10 +1037,10 @@ static void _game_video_copy_page(game_t* game, uint8_t src, uint8_t dst, int16_
 }
 
 static void _game_video_update_display(game_t* game, uint8_t page) {
-	debug(DBG_VIDEO, "Video::updateDisplay(%d)", page);
+	debug(GAME_DBG_VIDEO, "Video::updateDisplay(%d)", page);
 	if (page != 0xFE) {
 		if (page == 0xFF) {
-			SWAP(game->video.buffers[1], game->video.buffers[2]);
+			_SWAP(game->video.buffers[1], game->video.buffers[2], uint8_t);
 		} else {
 			game->video.buffers[1] = _game_video_get_page_ptr(game, page);
 		}
@@ -1020,7 +1067,7 @@ static void _game_video_draw_string(game_t* game, uint8_t color, uint16_t x, uin
 		warning("Unknown string id %d", strId);
 		return;
 	}
-	debug(DBG_VIDEO, "drawString(%d, %d, %d, '%s')", color, x, y, str);
+	debug(GAME_DBG_VIDEO, "drawString(%d, %d, %d, '%s')", color, x, y, str);
 	uint16_t xx = x;
     size_t len = strlen(str);
 	for (size_t i = 0; i < len; ++i) {
@@ -1038,7 +1085,7 @@ static void _game_video_draw_string(game_t* game, uint8_t color, uint16_t x, uin
 				}
 			}
 		} else {
-			Point pt(x * 8, y);
+			game_point_t pt = { .x = (int16_t)(x * 8), .y = (int16_t)y};
 			_game_gfx_draw_string_char(game, game->video.buffers[0], color, str[i], &pt);
 			++x;
 		}
@@ -1050,7 +1097,7 @@ static void _game_video_set_data_buffer(game_t* game, uint8_t *dataBuf, uint16_t
 	game->video.p_data.pc = dataBuf + offset;
 }
 
-static void _game_video_fill_polygon(game_t* game, uint16_t color, uint16_t zoom, const Point *pt) {
+static void _game_video_fill_polygon(game_t* game, uint16_t color, uint16_t zoom, const game_point_t *pt) {
 	const uint8_t *p = game->video.p_data.pc;
 
 	uint16_t bbw = (*p++) * zoom / 64;
@@ -1064,16 +1111,16 @@ static void _game_video_fill_polygon(game_t* game, uint16_t color, uint16_t zoom
 	if (x1 > 319 || x2 < 0 || y1 > 199 || y2 < 0)
 		return;
 
-	QuadStrip qs;
+	game_quad_strip_t qs;
 	qs.numVertices = *p++;
 	if ((qs.numVertices & 1) != 0) {
 		warning("Unexpected number of vertices %d", qs.numVertices);
 		return;
 	}
-	GAME_ASSERT(qs.numVertices < QuadStrip::MAX_VERTICES);
+	GAME_ASSERT(qs.numVertices < GAME_QUAD_STRIP_MAX_VERTICES);
 
 	for (int i = 0; i < qs.numVertices; ++i) {
-		Point *v = &qs.vertices[i];
+		game_point_t *v = &qs.vertices[i];
 		v->x = x1 + (*p++) * zoom / 64;
 		v->y = y1 + (*p++) * zoom / 64;
 	}
@@ -1085,23 +1132,23 @@ static void _game_video_fill_polygon(game_t* game, uint16_t color, uint16_t zoom
 	}
 }
 
-static void _game_video_draw_shape(game_t* game, uint8_t color, uint16_t zoom, const Point *pt);
+static void _game_video_draw_shape(game_t* game, uint8_t color, uint16_t zoom, const game_point_t *pt);
 
-static void _game_video_draw_shape_parts(game_t* game, uint16_t zoom, const Point *pgc) {
-	Point pt;
+static void _game_video_draw_shape_parts(game_t* game, uint16_t zoom, const game_point_t *pgc) {
+	game_point_t pt;
 	pt.x = pgc->x - fetchByte(&game->video.p_data) * zoom / 64;
 	pt.y = pgc->y - fetchByte(&game->video.p_data) * zoom / 64;
 	int16_t n = fetchByte(&game->video.p_data);
-	debug(DBG_VIDEO, "Video::drawShapeParts n=%d", n);
+	debug(GAME_DBG_VIDEO, "Video::drawShapeParts n=%d", n);
 	for ( ; n >= 0; --n) {
 		uint16_t offset = fetchWord(&game->video.p_data);
-		Point po(pt);
+		game_point_t po(pt);
 		po.x += fetchByte(&game->video.p_data) * zoom / 64;
 		po.y += fetchByte(&game->video.p_data) * zoom / 64;
 		uint16_t color = 0xFF;
 		if (offset & 0x8000) {
 			color = fetchByte(&game->video.p_data);
-            const int num = fetchByte(&game->video.p_data);
+            fetchByte(&game->video.p_data);
 			color &= 0x7F;
 		}
 		offset <<= 1;
@@ -1112,7 +1159,7 @@ static void _game_video_draw_shape_parts(game_t* game, uint16_t zoom, const Poin
 	}
 }
 
-static void _game_video_draw_shape(game_t* game, uint8_t color, uint16_t zoom, const Point *pt) {
+static void _game_video_draw_shape(game_t* game, uint8_t color, uint16_t zoom, const game_point_t *pt) {
     uint8_t i = fetchByte(&game->video.p_data);
 	if (i >= 0xC0) {
 		if (color & 0x80) {
@@ -1179,7 +1226,72 @@ static void _game_video_scale_bitmap(game_t* game, const uint8_t *src, int fmt) 
     _game_gfx_draw_bitmap(game, game->video.buffers[0], src, GAME_WIDTH, GAME_HEIGHT, fmt);
 }
 
-static void _game_video_copy_bitmap_ptr(game_t* game, const uint8_t *src, uint32_t size) {
+static void _clut(const uint8_t *src, const uint8_t *pal, int w, int h, int bpp, bool flipY, int colorKey, uint8_t *dst) {
+	int dstPitch = bpp * w;
+	if (flipY) {
+		dst += (h - 1) * bpp * w;
+		dstPitch = -bpp * w;
+	}
+	for (int y = 0; y < h; ++y) {
+		for (int x = 0; x < w; ++x) {
+			const int color = src[x];
+			const int b = pal[color * 4];
+			const int g = pal[color * 4 + 1];
+			const int r = pal[color * 4 + 2];
+			dst[x * bpp]     = r;
+			dst[x * bpp + 1] = g;
+			dst[x * bpp + 2] = b;
+			if (bpp == 4) {
+				dst[x * bpp + 3] = (color == 0 || (colorKey == ((r << 16) | (g << 8) | b))) ? 0 : 255;
+			}
+		}
+		src += w;
+		dst += dstPitch;
+	}
+}
+
+static uint8_t* _decode_bitmap(const uint8_t *src, int *w, int *h) {
+	if (memcmp(src, "BM", 2) != 0) {
+		return 0;
+	}
+	const uint32_t imageOffset = READ_LE_UINT32(src + 0xA);
+	const int width = READ_LE_UINT32(src + 0x12);
+	const int height = READ_LE_UINT32(src + 0x16);
+	const int depth = READ_LE_UINT16(src + 0x1C);
+	const int compression = READ_LE_UINT32(src + 0x1E);
+	if ((depth != 8 && depth != 32) || compression != 0) {
+		warning("Unhandled bitmap depth %d compression %d", depth, compression);
+		return 0;
+	}
+	const int bpp = 3;
+	uint8_t *dst = (uint8_t *)malloc(width * height * bpp);
+	if (!dst) {
+		warning("Failed to allocate bitmap buffer, width %d height %d bpp %d", width, height, bpp);
+		return 0;
+	}
+	if (depth == 8) {
+		const uint8_t *palette = src + 14 /* BITMAPFILEHEADER */ + 40 /* BITMAPINFOHEADER */;
+		const bool flipY = true;
+		_clut(src + imageOffset, palette, width, height, bpp, flipY, -1, dst);
+	} else {
+		GAME_ASSERT(depth == 32 && bpp == 3);
+		const uint8_t *p = src + imageOffset;
+		for (int y = height - 1; y >= 0; --y) {
+			uint8_t *q = dst + y * width * bpp;
+			for (int x = 0; x < width; ++x) {
+				const uint32_t color = READ_LE_UINT32(p); p += 4;
+				*q++ = (color >> 16) & 255;
+				*q++ = (color >>  8) & 255;
+				*q++ =  color        & 255;
+			}
+		}
+	}
+	*w = width;
+	*h = height;
+	return dst;
+}
+
+static void _game_video_copy_bitmap_ptr(game_t* game, const uint8_t *src) {
 	if (game->res.data_type == DT_DOS || game->res.data_type == DT_AMIGA) {
 		_decode_amiga(src, game->video.temp_bitmap);
 		_game_video_scale_bitmap(game, game->video.temp_bitmap, _GFX_FMT_CLUT);
@@ -1188,7 +1300,7 @@ static void _game_video_copy_bitmap_ptr(game_t* game, const uint8_t *src, uint32
 		_game_video_scale_bitmap(game, game->video.temp_bitmap, _GFX_FMT_CLUT);
 	} else { // .BMP
         int w, h;
-        uint8_t *buf = decode_bitmap(src, &w, &h);
+        uint8_t *buf = _decode_bitmap(src, &w, &h);
         if (buf) {
             _game_gfx_draw_bitmap(game, game->video.buffers[0], buf, w, h, _GFX_FMT_RGB);
             free(buf);
@@ -1216,11 +1328,11 @@ static void _game_audio_init_raw(game_audio_channel_t* chan, const uint8_t *data
 
 static void _game_audio_play_sound_raw(game_t* game, uint8_t channel, const uint8_t *data, int freq, uint8_t volume) {
     game_audio_channel_t* chan = &game->audio.channels[channel];
-    _game_audio_init_raw(chan, data, freq, volume, MIX_FREQ);
+    _game_audio_init_raw(chan, data, freq, volume, GAME_MIX_FREQ);
 }
 
 static void _game_play_sfx_music(game_t* game) {
-    _game_audio_sfx_play(game, MIX_FREQ);
+    _game_audio_sfx_play(game, GAME_MIX_FREQ);
 }
 
 static void _game_audio_stop_sfx_music(game_t* game) {
@@ -1228,7 +1340,7 @@ static void _game_audio_stop_sfx_music(game_t* game) {
 }
 
 static void _game_audio_stop_all(game_t* game) {
-    for (uint8_t i = 0; i < MIX_CHANNELS; ++i) {
+    for (uint8_t i = 0; i < GAME_MIX_CHANNELS; ++i) {
         _game_audio_stop_sound(game, i);
     }
     _game_audio_stop_sfx_music(game);
@@ -1253,7 +1365,7 @@ void _game_audio_mix_raw(game_audio_channel_t* chan, int16_t* sample) {
         if (chan->loop_len != 0) {
             if (pos >= chan->loop_pos + chan->loop_len) {
                 pos = chan->loop_pos;
-                chan->pos.offset = (chan->loop_pos << Frac::BITS) + chan->pos.inc;
+                chan->pos.offset = (chan->loop_pos << GAME_FRAC_BITS) + chan->pos.inc;
             }
         } else {
             if (pos >= chan->len) {
@@ -1277,7 +1389,7 @@ static void _game_audio_mix_channels(game_t* game, int16_t *samples, int count) 
      }
    } else {
      for (int i = 0; i < count; i += 2) {
-       for (int j = 0; j < MIX_CHANNELS; ++j) {
+       for (int j = 0; j < GAME_MIX_CHANNELS; ++j) {
             _game_audio_mix_raw(&game->audio.channels[j], &samples[i]);
        }
        samples[i + 1] = samples[i];
@@ -1286,7 +1398,7 @@ static void _game_audio_mix_channels(game_t* game, int16_t *samples, int count) 
   }
 
 static void _game_audio_update(game_t* game, int num_samples) {
-    GAME_ASSERT(num_samples < MIX_BUF_SIZE);
+    GAME_ASSERT(num_samples < GAME_MIX_BUF_SIZE);
     GAME_ASSERT(num_samples < GAME_MAX_AUDIO_SAMPLES);
     memset(game->audio.samples, 0, num_samples*sizeof(int16_t));
     _game_audio_mix_channels(game, game->audio.samples, num_samples);
@@ -1302,7 +1414,7 @@ static void _game_audio_update(game_t* game, int num_samples) {
 static const char* _game_res_get_game_title(game_t* game) {
 	switch (game->res.data_type) {
 	case DT_DOS:
-		if (game->res.lang == LANG_US) {
+		if (game->res.lang == GAME_LANG_US) {
 			return _kGameTitleUS;
 		}
 		/* fall-through */
@@ -1310,6 +1422,24 @@ static const char* _game_res_get_game_title(game_t* game) {
 		break;
 	}
 	return _kGameTitleEU;
+}
+
+static uint8_t read_byte(uint8_t** p) {
+    uint8_t b = *p[0];
+    (*p)++;
+    return b;
+}
+
+static uint16_t read_uint16_be(uint8_t** p) {
+    uint8_t hi = read_byte(p);
+	uint8_t lo = read_byte(p);
+	return (hi << 8) | lo;
+}
+
+static uint32_t read_uint32_be(uint8_t** p) {
+	uint16_t hi = read_uint16_be(p);
+	uint16_t lo = read_uint16_be(p);
+	return (hi << 16) | lo;
 }
 
 static void _game_res_read_entries(game_t* game) {
@@ -1322,33 +1452,32 @@ static void _game_res_read_entries(game_t* game) {
 	// 	return;
 	case DT_DOS: {
 			game->res.has_password_screen = false; // DOS demo versions do not have the resources
-			File f;
-			// if (f.open("demo01", _dataDir)) {
-			// 	_bankPrefix = "demo";
-			// }
-            {
-				game_mem_entry_t *me = game->res.mem_list;
-                f.setBuffer(dump_MEMLIST_BIN, sizeof(dump_MEMLIST_BIN));
-				while (1) {
-					GAME_ASSERT(game->res.num_mem_list < ARRAYSIZE(game->res.mem_list));
-					me->status = f.readByte();
-					me->type = f.readByte();
-					me->bufPtr = 0; f.readUint32BE();
-					me->rankNum = f.readByte();
-					me->bankNum = f.readByte();
-					me->bankPos = f.readUint32BE();
-					me->packedSize = f.readUint32BE();
-					me->unpackedSize = f.readUint32BE();
-					if (me->status == 0xFF) {
-						game->res.has_password_screen = false; // dump_BANK09 != NULL;
-						return;
-					}
-					++game->res.num_mem_list;
-					++me;
-				}
-			}
+            game_mem_entry_t *me = game->res.mem_list;
+            uint8_t* p = dump_MEMLIST_BIN;
+            while (1) {
+                GAME_ASSERT(game->res.num_mem_list < _ARRAYSIZE(game->res.mem_list));
+                me->status = read_byte(&p);
+                me->type = read_byte(&p);
+                me->bufPtr = 0; read_uint32_be(&p);
+                me->rankNum = read_byte(&p);
+                me->bankNum = read_byte(&p);
+                me->bankPos = read_uint32_be(&p);
+                me->packedSize = read_uint32_be(&p);
+                me->unpackedSize = read_uint32_be(&p);
+                if (me->status == 0xFF) {
+                    game->res.has_password_screen = false; // dump_BANK09 != NULL;
+                    return;
+                }
+                ++game->res.num_mem_list;
+                ++me;
+            }
 		}
 		break;
+    case DT_AMIGA:
+	case DT_ATARI:
+    case DT_ATARI_DEMO:
+        GAME_ASSERT(false);
+        break;
     // TODO:
 	// case DT_ATARI_DEMO: {
 	// 		File f;
@@ -1390,8 +1519,107 @@ static void _game_res_invalidate(game_t* game) {
 	game->video.current_pal = 0xFF;
 }
 
+typedef struct {
+	int size;
+	uint32_t crc;
+	uint32_t bits;
+	uint8_t *dst;
+	const uint8_t *src;
+} UnpackCtx;
+
+static bool _nextBit(UnpackCtx *uc) {
+	bool carry = (uc->bits & 1) != 0;
+	uc->bits >>= 1;
+	if (uc->bits == 0) { // getnextlwd
+		uc->bits = READ_BE_UINT32(uc->src); uc->src -= 4;
+		uc->crc ^= uc->bits;
+		carry = (uc->bits & 1) != 0;
+		uc->bits = (1 << 31) | (uc->bits >> 1);
+	}
+	return carry;
+}
+
+static int _getBits(UnpackCtx *uc, int count) { // rdd1bits
+	int bits = 0;
+	for (int i = 0; i < count; ++i) {
+		bits <<= 1;
+		if (_nextBit(uc)) {
+			bits |= 1;
+		}
+	}
+	return bits;
+}
+
+static void _copyLiteral(UnpackCtx *uc, int bitsCount, int len) { // getd3chr
+	int count = _getBits(uc, bitsCount) + len + 1;
+	uc->size -= count;
+	if (uc->size < 0) {
+		count += uc->size;
+		uc->size = 0;
+	}
+	for (int i = 0; i < count; ++i) {
+		*(uc->dst - i) = (uint8_t)_getBits(uc, 8);
+	}
+	uc->dst -= count;
+}
+
+static void _copyReference(UnpackCtx *uc, int bitsCount, int count) { // copyd3bytes
+	uc->size -= count;
+	if (uc->size < 0) {
+		count += uc->size;
+		uc->size = 0;
+	}
+	const int offset = _getBits(uc, bitsCount);
+	for (int i = 0; i < count; ++i) {
+		*(uc->dst - i) = *(uc->dst - i + offset);
+	}
+	uc->dst -= count;
+}
+
+static bool _bytekiller_unpack(uint8_t *dst, int dstSize, const uint8_t *src, int srcSize) {
+	UnpackCtx uc;
+	uc.src = src + srcSize - 4;
+	uc.size = READ_BE_UINT32(uc.src); uc.src -= 4;
+	if (uc.size > dstSize) {
+		warning("Unexpected unpack size %d, buffer size %d", uc.size, dstSize);
+		return false;
+	}
+	uc.dst = dst + uc.size - 1;
+	uc.crc = READ_BE_UINT32(uc.src); uc.src -= 4;
+	uc.bits = READ_BE_UINT32(uc.src); uc.src -= 4;
+	uc.crc ^= uc.bits;
+	do {
+		if (!_nextBit(&uc)) {
+			if (!_nextBit(&uc)) {
+				_copyLiteral(&uc, 3, 0);
+			} else {
+				_copyReference(&uc, 8, 2);
+			}
+		} else {
+			const int code = _getBits(&uc, 2);
+			switch (code) {
+			case 3:
+				_copyLiteral(&uc, 8, 8);
+				break;
+			case 2:
+				_copyReference(&uc, 12, _getBits(&uc, 8) + 1);
+				break;
+			case 1:
+				_copyReference(&uc, 10, 4);
+				break;
+			case 0:
+				_copyReference(&uc, 9, 3);
+				break;
+			}
+		}
+	} while (uc.size > 0);
+	assert(uc.size == 0);
+	return uc.crc == 0;
+}
+
+
 static bool _game_res_read_bank(game_t* game, const game_mem_entry_t *me, uint8_t *dstBuf) {
-	bool ret = false;
+    (void)game;
 	static uint8_t* banks[] = {
         dump_BANK01,
         dump_BANK02,
@@ -1408,18 +1636,15 @@ static bool _game_res_read_bank(game_t* game, const game_mem_entry_t *me, uint8_
         dump_BANK0D
     };
 
-	File f;
-    // TODO: (_dataType == DT_ATARI_DEMO && f.open(atariDemo, _dataDir))
-	{
-        f.setBuffer(banks[me->bankNum-1], sizeof(banks[me->bankNum-1]));
-		f.seek(me->bankPos);
-		const size_t count = f.read(dstBuf, me->packedSize);
-		ret = (count == me->packedSize);
-		if (ret && me->packedSize != me->unpackedSize) {
-			ret = bytekiller_unpack(dstBuf, me->unpackedSize, dstBuf, me->packedSize);
-		}
-	}
-	return ret;
+    if(banks[me->bankNum-1] == NULL)
+        return false;
+
+    memcpy(dstBuf, banks[me->bankNum-1] + me->bankPos, me->packedSize);
+    if (me->packedSize != me->unpackedSize) {
+        return _bytekiller_unpack(dstBuf, me->unpackedSize, dstBuf, me->packedSize);
+    }
+
+    return true;
 }
 
 static void _game_res_invalidate_all(game_t* game) {
@@ -1465,10 +1690,10 @@ static void _game_res_load(game_t* game) {
 			warning("Resource::load() ec=0x%X (me->bankNum == 0)", 0xF00);
 			me->status = GAME_RES_STATUS_NULL;
 		} else {
-			debug(DBG_BANK, "Resource::load() bufPos=0x%X size=%d type=%d pos=0x%X bankNum=%d", memPtr - game->res.mem, me->packedSize, me->type, me->bankPos, me->bankNum);
+			debug(GAME_DBG_BANK, "Resource::load() bufPos=0x%X size=%d type=%d pos=0x%X bankNum=%d", memPtr - game->res.mem, me->packedSize, me->type, me->bankPos, me->bankNum);
 			if (_game_res_read_bank(game, me, memPtr)) {
 				if (me->type == RT_BITMAP) {
-					_game_video_copy_bitmap_ptr(game, game->res.vid_cur_ptr, me->unpackedSize);
+					_game_video_copy_bitmap_ptr(game, game->res.vid_cur_ptr);
 					me->status = GAME_RES_STATUS_NULL;
 				} else {
 					me->bufPtr = memPtr;
@@ -1536,54 +1761,38 @@ static void _game_res_setup_part(game_t* game, int ptrId) {
 }
 
 static void _game_res_detect_version(game_t* game) {
-	//File f;
-	// if (f.open("memlist.bin", _dataDir)) {
 	game->res.data_type = DT_DOS;
-	debug(DBG_INFO, "Using DOS data files");
-	// } else if ((_amigaMemList = detectAmigaAtari(f, _dataDir)) != 0) {
-	// 	if (_amigaMemList == _memListAtariEN) {
-	// 		game->res.data_type = DT_ATARI;
-	// 		debug(DBG_INFO, "Using Atari data files");
-	// 	} else {
-	// 		game->res.data_type = DT_AMIGA;
-	// 		debug(DBG_INFO, "Using Amiga data files");
-	// 	}
-	// } else if (f.open(atariDemo, _dataDir) && f.size() == 96513) {
-	// 	game->res.data_type = DT_ATARI_DEMO;
-	// 	debug(DBG_INFO, "Using Atari demo file");
-	// } else {
-	// 	error("No data files found in '%s'", _dataDir);
-	// }
+	debug(GAME_DBG_INFO, "Using DOS data files");
 }
 
 // VM
 static void _op_mov_const(game_t* game) {
 	uint8_t i = fetchByte(&game->vm.ptr);
 	int16_t n = fetchWord(&game->vm.ptr);
-	debug(DBG_SCRIPT, "Script::op_movConst(0x%02X, %d)", i, n);
+	debug(GAME_DBG_SCRIPT, "Script::op_movConst(0x%02X, %d)", i, n);
 	game->vm.vars[i] = n;
 }
 
 static void _op_mov(game_t* game) {
 	uint8_t i = fetchByte(&game->vm.ptr);
 	uint8_t j = fetchByte(&game->vm.ptr);
-	debug(DBG_SCRIPT, "Script::op_mov(0x%02X, 0x%02X)", i, j);
+	debug(GAME_DBG_SCRIPT, "Script::op_mov(0x%02X, 0x%02X)", i, j);
 	game->vm.vars[i] = game->vm.vars[j];
 }
 
 static void _op_add(game_t* game) {
 	uint8_t i = fetchByte(&game->vm.ptr);
 	uint8_t j = fetchByte(&game->vm.ptr);
-	debug(DBG_SCRIPT, "Script::op_add(0x%02X, 0x%02X)", i, j);
+	debug(GAME_DBG_SCRIPT, "Script::op_add(0x%02X, 0x%02X)", i, j);
 	game->vm.vars[i] += game->vm.vars[j];
 }
 
 static int _get_sound_freq(uint8_t period) {
-	return kPaulaFreq / (_periodTable[period] * 2);
+	return GAME_PAULA_FREQ / (_periodTable[period] * 2);
 }
 
 static void _snd_playSound(game_t* game, uint16_t resNum, uint8_t freq, uint8_t vol, uint8_t channel) {
-	debug(DBG_SND, "snd_playSound(0x%X, %d, %d, %d)", resNum, freq, vol, channel);
+	debug(GAME_DBG_SND, "snd_playSound(0x%X, %d, %d, %d)", resNum, freq, vol, channel);
 	if (vol == 0) {
 		_game_audio_stop_sound(game, channel);
 		return;
@@ -1628,13 +1837,13 @@ static void _op_add_const(game_t* game) {
 	}
 	uint8_t i = fetchByte(&game->vm.ptr);
 	int16_t n = fetchWord(&game->vm.ptr);
-	debug(DBG_SCRIPT, "Script::op_addConst(0x%02X, %d)", i, n);
+	debug(GAME_DBG_SCRIPT, "Script::op_addConst(0x%02X, %d)", i, n);
 	game->vm.vars[i] += n;
 }
 
 static void _op_call(game_t* game) {
 	uint16_t off = fetchWord(&game->vm.ptr);
-	debug(DBG_SCRIPT, "Script::op_call(0x%X)", off);
+	debug(GAME_DBG_SCRIPT, "Script::op_call(0x%X)", off);
 	if (game->vm.stack_ptr == 0x40) {
 		error("Script::op_call() ec=0x%X stack overflow", 0x8F);
 	}
@@ -1644,7 +1853,7 @@ static void _op_call(game_t* game) {
 }
 
 static void _op_ret(game_t* game) {
-	debug(DBG_SCRIPT, "Script::op_ret()");
+	debug(GAME_DBG_SCRIPT, "Script::op_ret()");
 	if (game->vm.stack_ptr == 0) {
 		error("Script::op_ret() ec=0x%X stack underflow", 0x8F);
 	}
@@ -1653,27 +1862,27 @@ static void _op_ret(game_t* game) {
 }
 
 static void _op_yieldTask(game_t* game) {
-	debug(DBG_SCRIPT, "Script::op_yieldTask()");
+	debug(GAME_DBG_SCRIPT, "Script::op_yieldTask()");
 	game->vm.paused = true;
 }
 
 static void _op_jmp(game_t* game) {
 	uint16_t off = fetchWord(&game->vm.ptr);
-	debug(DBG_SCRIPT, "Script::op_jmp(0x%02X)", off);
+	debug(GAME_DBG_SCRIPT, "Script::op_jmp(0x%02X)", off);
 	game->vm.ptr.pc = game->res.seg_code + off;
 }
 
 static void _op_install_task(game_t* game) {
 	uint8_t i = fetchByte(&game->vm.ptr);
 	uint16_t n = fetchWord(&game->vm.ptr);
-	debug(DBG_SCRIPT, "Script::op_installTask(0x%X, 0x%X)", i, n);
+	debug(GAME_DBG_SCRIPT, "Script::op_installTask(0x%X, 0x%X)", i, n);
 	GAME_ASSERT(i < 0x40);
 	game->vm.tasks[1][i] = n;
 }
 
 static void _op_jmp_if_var(game_t* game) {
 	uint8_t i = fetchByte(&game->vm.ptr);
-	debug(DBG_SCRIPT, "Script::op_jmpIfVar(0x%02X)", i);
+	debug(GAME_DBG_SCRIPT, "Script::op_jmpIfVar(0x%02X)", i);
 	--game->vm.vars[i];
 	if (game->vm.vars[i] != 0) {
 		_op_jmp(game);
@@ -1697,7 +1906,7 @@ static void _fixUpPalette_changeScreen(game_t* game, int part, int screen) {
 		break;
 	}
 	if (pal != -1) {
-		debug(DBG_SCRIPT, "Setting palette %d for part %d screen %d", pal, part, screen);
+		debug(GAME_DBG_SCRIPT, "Setting palette %d for part %d screen %d", pal, part, screen);
 		_game_video_change_pal(game, pal);
 	}
 }
@@ -1714,13 +1923,13 @@ static void _op_cond_jmp(game_t* game) {
 	} else {
 		a = fetchByte(&game->vm.ptr);
 	}
-	debug(DBG_SCRIPT, "Script::op_condJmp(%d, 0x%02X, 0x%02X) var=0x%02X", op, b, a, var);
+	debug(GAME_DBG_SCRIPT, "Script::op_condJmp(%d, 0x%02X, 0x%02X) var=0x%02X", op, b, a, var);
 	bool expr = false;
 	switch (op & 7) {
 	case 0:
 		expr = (b == a);
 #ifdef BYPASS_PROTECTION
-		if (game->res.current_part == kPartCopyProtection) {
+		if (game->res.current_part == GAME_PART_COPY_PROTECTION) {
 			//
 			// 0CB8: jmpIf(VAR(0x29) == VAR(0x1E), @0CD3)
 			// ...
@@ -1761,9 +1970,9 @@ static void _op_cond_jmp(game_t* game) {
 	}
 	if (expr) {
 		_op_jmp(game);
-		if (var == VAR_SCREEN_NUM && game->vm.screen_num != game->vm.vars[VAR_SCREEN_NUM]) {
-			_fixUpPalette_changeScreen(game, game->res.current_part, game->vm.vars[VAR_SCREEN_NUM]);
-			game->vm.screen_num = game->vm.vars[VAR_SCREEN_NUM];
+		if (var == GAME_VAR_SCREEN_NUM && game->vm.screen_num != game->vm.vars[GAME_VAR_SCREEN_NUM]) {
+			_fixUpPalette_changeScreen(game, game->res.current_part, game->vm.vars[GAME_VAR_SCREEN_NUM]);
+			game->vm.screen_num = game->vm.vars[GAME_VAR_SCREEN_NUM];
 		}
 	} else {
 		fetchWord(&game->vm.ptr);
@@ -1772,9 +1981,9 @@ static void _op_cond_jmp(game_t* game) {
 
 static void _op_set_palette(game_t* game) {
 	uint16_t i = fetchWord(&game->vm.ptr);
-	debug(DBG_SCRIPT, "Script::op_changePalette(%d)", i);
+	debug(GAME_DBG_SCRIPT, "Script::op_changePalette(%d)", i);
 	const int num = i >> 8;
-	if (game->gfx.fix_up_palette == FIXUP_PALETTE_REDRAW) {
+	if (game->gfx.fix_up_palette == GAME_FIXUP_PALETTE_REDRAW) {
 		if (game->res.current_part == 16001) {
 			if (num == 10 || num == 16) {
 				return;
@@ -1795,7 +2004,7 @@ static void _op_changeTasksState(game_t* game) {
 	}
 	uint8_t state = fetchByte(&game->vm.ptr);
 
-	debug(DBG_SCRIPT, "Script::op_changeTasksState(%d, %d, %d)", start, end, state);
+	debug(GAME_DBG_SCRIPT, "Script::op_changeTasksState(%d, %d, %d)", start, end, state);
 
 	if (state == 2) {
 		for (; start <= end; ++start) {
@@ -1810,27 +2019,27 @@ static void _op_changeTasksState(game_t* game) {
 
 static void _op_selectPage(game_t* game) {
 	uint8_t i = fetchByte(&game->vm.ptr);
-	debug(DBG_SCRIPT, "Script::op_selectPage(%d)", i);
+	debug(GAME_DBG_SCRIPT, "Script::op_selectPage(%d)", i);
 	_game_video_set_work_page_ptr(game, i);
 }
 
 static void _op_fillPage(game_t* game) {
 	uint8_t i = fetchByte(&game->vm.ptr);
 	uint8_t color = fetchByte(&game->vm.ptr);
-	debug(DBG_SCRIPT, "Script::op_fillPage(%d, %d)", i, color);
+	debug(GAME_DBG_SCRIPT, "Script::op_fillPage(%d, %d)", i, color);
 	_game_video_fill_page(game, i, color);
 }
 
 static void _op_copyPage(game_t* game) {
 	uint8_t i = fetchByte(&game->vm.ptr);
 	uint8_t j = fetchByte(&game->vm.ptr);
-	debug(DBG_SCRIPT, "Script::op_copyPage(%d, %d)", i, j);
-    _game_video_copy_page(game, i, j, game->vm.vars[VAR_SCROLL_Y]);
+	debug(GAME_DBG_SCRIPT, "Script::op_copyPage(%d, %d)", i, j);
+    _game_video_copy_page(game, i, j, game->vm.vars[GAME_VAR_SCROLL_Y]);
 }
 
 static void _inp_handleSpecialKeys(game_t* game) {
 	if (game->input.pause) {
-		if (game->res.current_part != kPartCopyProtection && game->res.current_part != kPartIntro) {
+		if (game->res.current_part != GAME_PART_COPY_PROTECTION && game->res.current_part != GAME_PART_INTRO) {
 			game->input.pause = false;
             // TODO:
 			//while (!game->input.pause && !game->input.quit) {
@@ -1846,8 +2055,8 @@ static void _inp_handleSpecialKeys(game_t* game) {
 	if (game->input.code) {
 		game->input.code = false;
 		if (game->res.has_password_screen) {
-			if (game->res.current_part != kPartPassword && game->res.current_part != kPartCopyProtection) {
-				game->res.next_part = kPartPassword;
+			if (game->res.current_part != GAME_PART_PASSWORD && game->res.current_part != GAME_PART_COPY_PROTECTION) {
+				game->res.next_part = GAME_PART_PASSWORD;
 			}
 		}
 	}
@@ -1855,7 +2064,7 @@ static void _inp_handleSpecialKeys(game_t* game) {
 
 static void _op_updateDisplay(game_t* game) {
 	uint8_t page = fetchByte(&game->vm.ptr);
-	debug(DBG_SCRIPT, "Script::op_updateDisplay(%d)", page);
+	debug(GAME_DBG_SCRIPT, "Script::op_updateDisplay(%d)", page);
 	_inp_handleSpecialKeys(game);
 
 #ifndef BYPASS_PROTECTION
@@ -1866,9 +2075,9 @@ static void _op_updateDisplay(game_t* game) {
 #endif
 
 	const int frameHz = 50;
-	if (!game->vm.fast_mode && game->vm.vars[VAR_PAUSE_SLICES] != 0) {
+	if (!game->vm.fast_mode && game->vm.vars[GAME_VAR_PAUSE_SLICES] != 0) {
 		const int delay = game->elapsed - game->vm.time_stamp;
-		const int pause = game->vm.vars[VAR_PAUSE_SLICES] * 1000 / frameHz - delay;
+		const int pause = game->vm.vars[GAME_VAR_PAUSE_SLICES] * 1000 / frameHz - delay;
 		if (pause > 0) {
 			game->sleep += pause;
 		}
@@ -1880,7 +2089,7 @@ static void _op_updateDisplay(game_t* game) {
 }
 
 static void _op_removeTask(game_t* game) {
-	debug(DBG_SCRIPT, "Script::op_removeTask()");
+	debug(GAME_DBG_SCRIPT, "Script::op_removeTask()");
 	game->vm.ptr.pc = game->res.seg_code + 0xFFFF;
 	game->vm.paused = true;
 }
@@ -1890,42 +2099,42 @@ static void _op_drawString(game_t* game) {
 	uint16_t x = fetchByte(&game->vm.ptr);
 	uint16_t y = fetchByte(&game->vm.ptr);
 	uint16_t col = fetchByte(&game->vm.ptr);
-	debug(DBG_SCRIPT, "Script::op_drawString(0x%03X, %d, %d, %d)", strId, x, y, col);
+	debug(GAME_DBG_SCRIPT, "Script::op_drawString(0x%03X, %d, %d, %d)", strId, x, y, col);
 	_game_video_draw_string(game, col, x, y, strId);
 }
 
 static void _op_sub(game_t* game) {
 	uint8_t i = fetchByte(&game->vm.ptr);
 	uint8_t j = fetchByte(&game->vm.ptr);
-	debug(DBG_SCRIPT, "Script::op_sub(0x%02X, 0x%02X)", i, j);
+	debug(GAME_DBG_SCRIPT, "Script::op_sub(0x%02X, 0x%02X)", i, j);
 	game->vm.vars[i] -= game->vm.vars[j];
 }
 
 static void _op_and(game_t* game) {
 	uint8_t i = fetchByte(&game->vm.ptr);
 	uint16_t n = fetchWord(&game->vm.ptr);
-	debug(DBG_SCRIPT, "Script::op_and(0x%02X, %d)", i, n);
+	debug(GAME_DBG_SCRIPT, "Script::op_and(0x%02X, %d)", i, n);
 	game->vm.vars[i] = (uint16_t)game->vm.vars[i] & n;
 }
 
 static void _op_or(game_t* game) {
 	uint8_t i = fetchByte(&game->vm.ptr);
 	uint16_t n = fetchWord(&game->vm.ptr);
-	debug(DBG_SCRIPT, "Script::op_or(0x%02X, %d)", i, n);
+	debug(GAME_DBG_SCRIPT, "Script::op_or(0x%02X, %d)", i, n);
 	game->vm.vars[i] = (uint16_t)game->vm.vars[i] | n;
 }
 
 static void _op_shl(game_t* game) {
 	uint8_t i = fetchByte(&game->vm.ptr);
 	uint16_t n = fetchWord(&game->vm.ptr);
-	debug(DBG_SCRIPT, "Script::op_shl(0x%02X, %d)", i, n);
+	debug(GAME_DBG_SCRIPT, "Script::op_shl(0x%02X, %d)", i, n);
 	game->vm.vars[i] = (uint16_t)game->vm.vars[i] << n;
 }
 
 static void _op_shr(game_t* game) {
 	uint8_t i = fetchByte(&game->vm.ptr);
 	uint16_t n = fetchWord(&game->vm.ptr);
-	debug(DBG_SCRIPT, "Script::op_shr(0x%02X, %d)", i, n);
+	debug(GAME_DBG_SCRIPT, "Script::op_shr(0x%02X, %d)", i, n);
 	game->vm.vars[i] = (uint16_t)game->vm.vars[i] >> n;
 }
 
@@ -1934,13 +2143,13 @@ static void _op_playSound(game_t* game) {
 	uint8_t freq = fetchByte(&game->vm.ptr);
 	uint8_t vol = fetchByte(&game->vm.ptr);
 	uint8_t channel = fetchByte(&game->vm.ptr);
-	debug(DBG_SCRIPT, "Script::op_playSound(0x%X, %d, %d, %d)", resNum, freq, vol, channel);
+	debug(GAME_DBG_SCRIPT, "Script::op_playSound(0x%X, %d, %d, %d)", resNum, freq, vol, channel);
 	_snd_playSound(game, resNum, freq, vol, channel);
 }
 
 static void _op_updateResources(game_t* game) {
 	uint16_t num = fetchWord(&game->vm.ptr);
-	debug(DBG_SCRIPT, "Script::op_updateResources(%d)", num);
+	debug(GAME_DBG_SCRIPT, "Script::op_updateResources(%d)", num);
 	if (num == 0) {
 		_game_audio_stop_all(game);
 		_game_res_invalidate(game);
@@ -1950,7 +2159,7 @@ static void _op_updateResources(game_t* game) {
 }
 
 static void _snd_playMusic(game_t* game, uint16_t resNum, uint16_t delay, uint8_t pos) {
-	debug(DBG_SND, "snd_playMusic(0x%X, %d, %d)", resNum, delay, pos);
+	debug(GAME_DBG_SND, "snd_playMusic(0x%X, %d, %d)", resNum, delay, pos);
 	// DT_AMIGA, DT_ATARI, DT_DOS
     if (resNum != 0) {
         _game_audio_sfx_load_module(game, resNum, delay, pos);
@@ -1967,7 +2176,7 @@ static void _op_playMusic(game_t* game) {
 	uint16_t resNum = fetchWord(&game->vm.ptr);
 	uint16_t delay = fetchWord(&game->vm.ptr);
 	uint8_t pos = fetchByte(&game->vm.ptr);
-	debug(DBG_SCRIPT, "Script::op_playMusic(0x%X, %d, %d)", resNum, delay, pos);
+	debug(GAME_DBG_SCRIPT, "Script::op_playMusic(0x%X, %d, %d)", resNum, delay, pos);
 	_snd_playMusic(game, resNum, delay, pos);
 }
 
@@ -2011,7 +2220,7 @@ static const _opcode_func _opTable[] = {
 // VM
 static void _game_vm_restart_at(game_t* game, int part, int pos) {
     _game_audio_stop_all(game);
-	if (game->res.data_type == DT_DOS && part == kPartCopyProtection) {
+	if (game->res.data_type == DT_DOS && part == GAME_PART_COPY_PROTECTION) {
 		// VAR(0x54) indicates if the "Out of this World" title screen should be presented
 		//
 		//   0084: jmpIf(VAR(0x54) < 128, @00C4)
@@ -2035,7 +2244,7 @@ static void _game_vm_restart_at(game_t* game, int part, int pos) {
 		game->vm.vars[0] = pos;
 	}
 	game->vm.start_time = game->vm.time_stamp = game->elapsed;
-	if (part == kPartWater) {
+	if (part == GAME_PART_WATER) {
         // TODO:
 		// if (game->res._demo3Joy.start()) {
 		// 	memset(game->vm.vars, 0, sizeof(game->vm.vars));
@@ -2059,67 +2268,67 @@ static void _game_vm_setup_tasks(game_t* game) {
 }
 
 static void _game_vm_update_input(game_t* game) {
-	if (game->res.current_part == kPartPassword) {
-		char c = game->input.lastChar;
+	if (game->res.current_part == GAME_PART_PASSWORD) {
+		char c = game->input.last_char;
 		if (c == 8 || /*c == 0xD ||*/ c == 0 || (c >= 'a' && c <= 'z')) {
-			game->vm.vars[VAR_LAST_KEYCHAR] = c & ~0x20;
-			game->input.lastChar = 0;
+			game->vm.vars[GAME_VAR_LAST_KEYCHAR] = c & ~0x20;
+			game->input.last_char = 0;
 		}
 	}
 	int16_t lr = 0;
 	int16_t m = 0;
 	int16_t ud = 0;
 	int16_t jd = 0;
-	if (game->input.dirMask & DIR_RIGHT) {
+	if (game->input.dir_mask & DIR_RIGHT) {
 		lr = 1;
 		m |= 1;
 	}
-	if (game->input.dirMask & DIR_LEFT) {
+	if (game->input.dir_mask & DIR_LEFT) {
 		lr = -1;
 		m |= 2;
 	}
-	if (game->input.dirMask & DIR_DOWN) {
+	if (game->input.dir_mask & DIR_DOWN) {
 		ud = jd = 1;
 		m |= 4; // crouch
 	}
-    if (game->input.dirMask & DIR_UP) {
+    if (game->input.dir_mask & DIR_UP) {
         ud = jd = -1;
         m |= 8; // jump
     }
 	if (!(game->res.data_type == DT_AMIGA || game->res.data_type == DT_ATARI)) {
-		game->vm.vars[VAR_HERO_POS_UP_DOWN] = ud;
+		game->vm.vars[GAME_VAR_HERO_POS_UP_DOWN] = ud;
 	}
-	game->vm.vars[VAR_HERO_POS_JUMP_DOWN] = jd;
-	game->vm.vars[VAR_HERO_POS_LEFT_RIGHT] = lr;
-	game->vm.vars[VAR_HERO_POS_MASK] = m;
+	game->vm.vars[GAME_VAR_HERO_POS_JUMP_DOWN] = jd;
+	game->vm.vars[GAME_VAR_HERO_POS_LEFT_RIGHT] = lr;
+	game->vm.vars[GAME_VAR_HERO_POS_MASK] = m;
 	int16_t action = 0;
 	if (game->input.action) {
 		action = 1;
 		m |= 0x80;
 	}
-	game->vm.vars[VAR_HERO_ACTION] = action;
-	game->vm.vars[VAR_HERO_ACTION_POS_MASK] = m;
-	if (game->res.current_part == kPartWater) {
+	game->vm.vars[GAME_VAR_HERO_ACTION] = action;
+	game->vm.vars[GAME_VAR_HERO_ACTION_POS_MASK] = m;
+	if (game->res.current_part == GAME_PART_WATER) {
         // TODO:
 		// const uint8_t mask = game->res._demo3Joy.update();
 		// if (mask != 0) {
-		// 	game->vm.vars[VAR_HERO_ACTION_POS_MASK] = mask;
-		// 	game->vm.vars[VAR_HERO_POS_MASK] = mask & 15;
-		// 	game->vm.vars[VAR_HERO_POS_LEFT_RIGHT] = 0;
+		// 	game->vm.vars[GAME_VAR_HERO_ACTION_POS_MASK] = mask;
+		// 	game->vm.vars[GAME_VAR_HERO_POS_MASK] = mask & 15;
+		// 	game->vm.vars[GAME_VAR_HERO_POS_LEFT_RIGHT] = 0;
 		// 	if (mask & 1) {
-		// 		game->vm.vars[VAR_HERO_POS_LEFT_RIGHT] = 1;
+		// 		game->vm.vars[GAME_VAR_HERO_POS_LEFT_RIGHT] = 1;
 		// 	}
 		// 	if (mask & 2) {
-		// 		game->vm.vars[VAR_HERO_POS_LEFT_RIGHT] = -1;
+		// 		game->vm.vars[GAME_VAR_HERO_POS_LEFT_RIGHT] = -1;
 		// 	}
-		// 	game->vm.vars[VAR_HERO_POS_JUMP_DOWN] = 0;
+		// 	game->vm.vars[GAME_VAR_HERO_POS_JUMP_DOWN] = 0;
 		// 	if (mask & 4) {
-		// 		game->vm.vars[VAR_HERO_POS_JUMP_DOWN] = 1;
+		// 		game->vm.vars[GAME_VAR_HERO_POS_JUMP_DOWN] = 1;
 		// 	}
 		// 	if (mask & 8) {
-		// 		game->vm.vars[VAR_HERO_POS_JUMP_DOWN] = -1;
+		// 		game->vm.vars[GAME_VAR_HERO_POS_JUMP_DOWN] = -1;
 		// 	}
-		// 	game->vm.vars[VAR_HERO_ACTION] = (mask >> 7);
+		// 	game->vm.vars[GAME_VAR_HERO_ACTION] = (mask >> 7);
 		// }
 	}
 }
@@ -2130,7 +2339,7 @@ static void _game_vm_execute_task(game_t* game) {
 		if (opcode & 0x80) {
 			const uint16_t off = ((opcode << 8) | fetchByte(&game->vm.ptr)) << 1;
 			game->res.use_seg_video2 = false;
-			Point pt;
+			game_point_t pt;
 			pt.x = fetchByte(&game->vm.ptr);
 			pt.y = fetchByte(&game->vm.ptr);
 			int16_t h = pt.y - 199;
@@ -2138,11 +2347,11 @@ static void _game_vm_execute_task(game_t* game) {
 				pt.y = 199;
 				pt.x += h;
 			}
-			debug(DBG_VIDEO, "vid_opcd_0x80 : opcode=0x%X off=0x%X x=%d y=%d", opcode, off, pt.x, pt.y);
+			debug(GAME_DBG_VIDEO, "vid_opcd_0x80 : opcode=0x%X off=0x%X x=%d y=%d", opcode, off, pt.x, pt.y);
 			_game_video_set_data_buffer(game, game->res.seg_video1, off);
 			_game_video_draw_shape(game, 0xFF, 64, &pt);
 		} else if (opcode & 0x40) {
-			Point pt;
+			game_point_t pt;
 			const uint8_t offsetHi = fetchByte(&game->vm.ptr);
 			const uint16_t off = ((offsetHi << 8) | fetchByte(&game->vm.ptr)) << 1;
 			pt.x = fetchByte(&game->vm.ptr);
@@ -2178,7 +2387,7 @@ static void _game_vm_execute_task(game_t* game) {
 					zoom = fetchByte(&game->vm.ptr);
 				}
 			}
-			debug(DBG_VIDEO, "vid_opcd_0x40 : off=0x%X x=%d y=%d", off, pt.x, pt.y);
+			debug(GAME_DBG_VIDEO, "vid_opcd_0x40 : off=0x%X x=%d y=%d", off, pt.x, pt.y);
 			_game_video_set_data_buffer(game, game->res.use_seg_video2 ? game->res.seg_video2 : game->res.seg_video1, off);
 			_game_video_draw_shape(game, 0xFF, zoom, &pt);
 		} else {
@@ -2199,10 +2408,10 @@ static void _game_vm_run(game_t* game) {
 				game->vm.ptr.pc = game->res.seg_code + n;
 				game->vm.stack_ptr = 0;
 				game->vm.paused = false;
-				debug(DBG_SCRIPT, "Script::runTasks() i=0x%02X n=0x%02X", i, n);
+				debug(GAME_DBG_SCRIPT, "Script::runTasks() i=0x%02X n=0x%02X", i, n);
                 _game_vm_execute_task(game);
 				game->vm.tasks[0][i] = game->vm.ptr.pc - game->res.seg_code;
-				debug(DBG_SCRIPT, "Script::runTasks() i=0x%02X pos=0x%X", i, game->vm.tasks[0][i]);
+				debug(GAME_DBG_SCRIPT, "Script::runTasks() i=0x%02X pos=0x%X", i, game->vm.tasks[0][i]);
 			}
 		}
 	}
@@ -2216,7 +2425,7 @@ void game_init(game_t* game, const game_desc_t* desc) {
     game->valid = true;
     game->debug = desc->debug;
 
-    g_debugMask = DBG_INFO | DBG_VIDEO | DBG_SND | DBG_SCRIPT | DBG_BANK | DBG_SER;
+    g_debugMask = GAME_DBG_INFO | GAME_DBG_VIDEO | GAME_DBG_SND | GAME_DBG_SCRIPT | GAME_DBG_BANK;
     game->part_num = desc->part_num;
     _game_res_detect_version(game);
     _game_video_init(game);
@@ -2241,10 +2450,10 @@ void game_init(game_t* game, const game_desc_t* desc) {
     case DT_ATARI:
     case DT_ATARI_DEMO:
         switch (game->res.lang) {
-        case LANG_FR:
+        case GAME_LANG_FR:
             game->video.strings_table = _strings_table_fr;
             break;
-        case LANG_US:
+        case GAME_LANG_US:
         default:
             game->video.strings_table = _strings_table_eng;
             break;
@@ -2334,11 +2543,11 @@ gfx_display_info_t game_display_info(game_t* game) {
                 .width = GAME_WIDTH,
                 .height = GAME_HEIGHT,
             },
-            .bytes_per_pixel = 1,
             .buffer = {
                 .ptr = game->gfx.fb,
                 .size = GAME_WIDTH*GAME_HEIGHT,
-            }
+            },
+            .bytes_per_pixel = 1
         },
         .screen = {
             .x = 0,
@@ -2357,11 +2566,10 @@ gfx_display_info_t game_display_info(game_t* game) {
 void game_key_down(game_t* game, game_input_t input) {
     (void)game;
     switch(input) {
-        case GAME_INPUT_LEFT:   game->input.dirMask |= DIR_LEFT; break;
-        case GAME_INPUT_RIGHT:  game->input.dirMask |= DIR_RIGHT; break;
-        case GAME_INPUT_UP:     game->input.dirMask |= DIR_UP; break;
-        case GAME_INPUT_DOWN:   game->input.dirMask |= DIR_DOWN; break;
-        case GAME_INPUT_JUMP:   game->input.jump = true; break;
+        case GAME_INPUT_LEFT:   game->input.dir_mask |= DIR_LEFT; break;
+        case GAME_INPUT_RIGHT:  game->input.dir_mask |= DIR_RIGHT; break;
+        case GAME_INPUT_UP:     game->input.dir_mask |= DIR_UP; break;
+        case GAME_INPUT_DOWN:   game->input.dir_mask |= DIR_DOWN; break;
         case GAME_INPUT_ACTION: game->input.action = true; break;
         case GAME_INPUT_BACK:   game->input.back = true; break;
         case GAME_INPUT_CODE:   game->input.code = true; break;
@@ -2372,11 +2580,10 @@ void game_key_down(game_t* game, game_input_t input) {
 void game_key_up(game_t* game, game_input_t input) {
     (void)game;
     switch(input) {
-        case GAME_INPUT_LEFT:   game->input.dirMask &= ~DIR_LEFT; break;
-        case GAME_INPUT_RIGHT:  game->input.dirMask &= ~DIR_RIGHT; break;
-        case GAME_INPUT_UP:     game->input.dirMask &= ~DIR_UP; break;
-        case GAME_INPUT_DOWN:   game->input.dirMask &= ~DIR_DOWN; break;
-        case GAME_INPUT_JUMP:   game->input.jump = false; break;
+        case GAME_INPUT_LEFT:   game->input.dir_mask &= ~DIR_LEFT; break;
+        case GAME_INPUT_RIGHT:  game->input.dir_mask &= ~DIR_RIGHT; break;
+        case GAME_INPUT_UP:     game->input.dir_mask &= ~DIR_UP; break;
+        case GAME_INPUT_DOWN:   game->input.dir_mask &= ~DIR_DOWN; break;
         case GAME_INPUT_ACTION: game->input.action = false; break;
         case GAME_INPUT_BACK:   game->input.back = false; break;
         case GAME_INPUT_CODE:   game->input.code = false; break;
@@ -2386,7 +2593,7 @@ void game_key_up(game_t* game, game_input_t input) {
 
 void game_char_pressed(game_t* game, int c) {
     (void)game;
-    game->input.lastChar = (char)c;
+    game->input.last_char = (char)c;
 }
 
 bool game_get_res_buf(game_t* game, int id, uint8_t* dst) {

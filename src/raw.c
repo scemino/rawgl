@@ -51,6 +51,7 @@ static void app_init(void) {
     game_init(&state.game, &(game_desc_t){
         .part_num = 16001,
         .demo3_joy_inputs = true,
+        .lang = GAME_LANG_US,
         .audio = {
             .callback = { .func = push_audio },
             .sample_rate = saudio_sample_rate()
@@ -123,7 +124,6 @@ void app_input(const sapp_event* event) {
                 case SAPP_KEYCODE_RIGHT:        c = GAME_INPUT_RIGHT; break;
                 case SAPP_KEYCODE_DOWN:         c = GAME_INPUT_DOWN; break;
                 case SAPP_KEYCODE_UP:           c = GAME_INPUT_UP; break;
-                case SAPP_KEYCODE_D:            c = GAME_INPUT_JUMP; break;
                 case SAPP_KEYCODE_ENTER:        c = GAME_INPUT_ACTION; break;
                 case SAPP_KEYCODE_SPACE:        c = GAME_INPUT_ACTION; break;
                 case SAPP_KEYCODE_ESCAPE:       c = GAME_INPUT_BACK; break;

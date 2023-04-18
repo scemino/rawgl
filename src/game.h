@@ -4,42 +4,71 @@
 extern "C" {
 #endif
 
-#define GAME_WIDTH                     (320)
-#define GAME_HEIGHT                    (200)
-#define GAME_DEFAULT_AUDIO_SAMPLE_RATE (44100)
-#define GAME_DEFAULT_AUDIO_SAMPLES  (128)        // default number of samples in internal sample buffer
-#define GAME_MAX_AUDIO_SAMPLES      (2048*16)        // max number of audio samples in internal sample buffer
-#define GAME_ENTRIES_COUNT_20TH     (178)
-#define GAME_MEM_BLOCK_SIZE         (1 * 1024 * 1024)
-#define GAME_RES_STATUS_NULL        (0)
-#define GAME_RES_STATUS_LOADED      (1)
-#define GAME_RES_STATUS_TOLOAD      (2)
+#define GAME_WIDTH                      (320)
+#define GAME_HEIGHT                     (200)
+#define GAME_DEFAULT_AUDIO_SAMPLE_RATE  (44100)
+#define GAME_DEFAULT_AUDIO_SAMPLES      (128)        // default number of samples in internal sample buffer
+#define GAME_MAX_AUDIO_SAMPLES          (2048*16)        // max number of audio samples in internal sample buffer
+#define GAME_ENTRIES_COUNT_20TH         (178)
+#define GAME_MEM_BLOCK_SIZE             (1 * 1024 * 1024)
+#define GAME_RES_STATUS_NULL            (0)
+#define GAME_RES_STATUS_LOADED          (1)
+#define GAME_RES_STATUS_TOLOAD          (2)
 
-#define VAR_RANDOM_SEED          (0x3C)
-#define VAR_SCREEN_NUM           (0x67)
-#define VAR_LAST_KEYCHAR         (0xDA)
-#define VAR_HERO_POS_UP_DOWN     (0xE5)
-#define VAR_MUSIC_SYNC           (0xF4)
-#define VAR_SCROLL_Y             (0xF9)
-#define VAR_HERO_ACTION          (0xFA)
-#define VAR_HERO_POS_JUMP_DOWN   (0xFB)
-#define VAR_HERO_POS_LEFT_RIGHT  (0xFC)
-#define VAR_HERO_POS_MASK        (0xFD)
-#define VAR_HERO_ACTION_POS_MASK (0xFE)
-#define VAR_PAUSE_SLICES         (0xFF)
+#define GAME_VAR_RANDOM_SEED            (0x3C)
+#define GAME_VAR_SCREEN_NUM             (0x67)
+#define GAME_VAR_LAST_KEYCHAR           (0xDA)
+#define GAME_VAR_HERO_POS_UP_DOWN       (0xE5)
+#define GAME_VAR_MUSIC_SYNC             (0xF4)
+#define GAME_VAR_SCROLL_Y               (0xF9)
+#define GAME_VAR_HERO_ACTION            (0xFA)
+#define GAME_VAR_HERO_POS_JUMP_DOWN     (0xFB)
+#define GAME_VAR_HERO_POS_LEFT_RIGHT    (0xFC)
+#define GAME_VAR_HERO_POS_MASK          (0xFD)
+#define GAME_VAR_HERO_ACTION_POS_MASK   (0xFE)
+#define GAME_VAR_PAUSE_SLICES           (0xFF)
 
-#define  MIX_FREQ               (44100)
-#define  MIX_BUF_SIZE           (4096*8)
-#define  MIX_CHANNELS           (4)
-#define  SFX_NUM_CHANNELS       (4)
+#define GAME_MIX_FREQ                   (44100)
+#define GAME_MIX_BUF_SIZE               (4096*8)
+#define GAME_MIX_CHANNELS               (4)
+#define GAME_SFX_NUM_CHANNELS           (4)
+#define GAME_PAULA_FREQ                 (7159092)
 
-#define  FIXUP_PALETTE_REDRAW   (1)
+#define GAME_FIXUP_PALETTE_REDRAW       (1) // redraw all primitives on setPal script call
 
-#define  FRAC_BITS              (16)
-#define  FRAC_MASK              ((1 << FRAC_BITS) - 1)
+#define GAME_FRAC_BITS                  (16)
+#define GAME_FRAC_MASK                  ((1 << GAME_FRAC_BITS) - 1)
+
+#define GAME_DBG_SCRIPT                 (1 << 0)
+#define GAME_DBG_BANK                   (1 << 1)
+#define GAME_DBG_VIDEO                  (1 << 2)
+#define GAME_DBG_SND                    (1 << 3)
+#define GAME_DBG_INFO                   (1 << 5)
+#define GAME_DBG_PAK                    (1 << 6)
+#define GAME_DBG_RESOURCE               (1 << 7)
+
+#define GAME_PART_COPY_PROTECTION    16000
+#define GAME_PART_INTRO              16001
+#define GAME_PART_WATER              16002
+#define GAME_PART_PRISON             16003
+#define GAME_PART_CITE               16004
+#define GAME_PART_ARENE              16005
+#define GAME_PART_LUXE               16006
+#define GAME_PART_FINAL              16007
+#define GAME_PART_PASSWORD           16008
+
+#define GAME_QUAD_STRIP_MAX_VERTICES (70)
 
 typedef struct {
+	int16_t x, y;
+} game_point_t;
 
+typedef struct {
+	uint8_t numVertices;
+	game_point_t vertices[GAME_QUAD_STRIP_MAX_VERTICES];
+} game_quad_strip_t;
+
+typedef struct {
 	uint32_t inc;
 	uint64_t offset;
 } game_frac_t;
@@ -57,7 +86,6 @@ typedef enum  {
 	GAME_INPUT_RIGHT,
 	GAME_INPUT_UP,
 	GAME_INPUT_DOWN,
-	GAME_INPUT_JUMP,
 	GAME_INPUT_ACTION,
     GAME_INPUT_BACK,
     GAME_INPUT_CODE,
@@ -129,7 +157,7 @@ typedef struct {
 	bool                        playing;
 	int                         rate;
 	int                         samples_left;
-	game_audio_sfx_channel_t    channels[SFX_NUM_CHANNELS];
+	game_audio_sfx_channel_t    channels[GAME_SFX_NUM_CHANNELS];
 } game_audio_sfx_player_t;
 
 typedef struct {
@@ -219,14 +247,12 @@ typedef struct {
         uint8_t*            draw_page_ptr;
         int                 u, v;
         int                 fix_up_palette;
-        uint32_t            pal[16];
-        uint8_t             color_buffer[GAME_WIDTH * GAME_HEIGHT];
     } gfx;
 
     struct {
         float                   sample_buffer[GAME_MAX_AUDIO_SAMPLES];
-        int16_t                 samples[MIX_BUF_SIZE];
-        game_audio_channel_t    channels[MIX_CHANNELS];
+        int16_t                 samples[GAME_MIX_BUF_SIZE];
+        game_audio_channel_t    channels[GAME_MIX_CHANNELS];
         game_audio_sfx_player_t sfx_player;
         game_audio_callback_t   callback;
     } audio;
@@ -255,16 +281,13 @@ typedef struct {
     } vm;
 
     struct {
-        uint8_t dirMask;
+        uint8_t dir_mask;
         bool    action; // run,shoot
-        bool    jump;
         bool    code;
         bool    pause;
         bool    quit;
         bool    back;
-        char    lastChar;
-        bool    fastMode;
-        bool    screenshot;
+        char    last_char;
     } input;
 
     const char* title;      // title of the game

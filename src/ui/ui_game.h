@@ -156,41 +156,41 @@ static void _ui_game_draw_vm(ui_game_t* ui) {
             const char* s = NULL;
             char tmp[16];
             switch(i) {
-                case VAR_RANDOM_SEED:
+                case GAME_VAR_RANDOM_SEED:
                 s = "RANDOM_SEED";
                 break;
-                case VAR_SCREEN_NUM:
+                case GAME_VAR_SCREEN_NUM:
                 s = "SCREEN_NUM";
                 break;
-                case VAR_LAST_KEYCHAR:
+                case GAME_VAR_LAST_KEYCHAR:
                 s = "LAST_KEYCHAR";
                 break;
-                case VAR_HERO_POS_UP_DOWN:
+                case GAME_VAR_HERO_POS_UP_DOWN:
                 s = "HERO_POS_UP_DOWN";
                 break;
-                case VAR_MUSIC_SYNC:
+                case GAME_VAR_MUSIC_SYNC:
                 s = "MUSIC_SYNC";
                 break;
-                case VAR_SCROLL_Y:
+                case GAME_VAR_SCROLL_Y:
                 s = "SCROLL_Y";
                 break;
-                case VAR_HERO_ACTION:
+                case GAME_VAR_HERO_ACTION:
                 s = "HERO_ACTION";
                 break;
-                case VAR_HERO_POS_JUMP_DOWN:
-                s = "VAR_HERO_POS_JUMP_DOWN";
+                case GAME_VAR_HERO_POS_JUMP_DOWN:
+                s = "GAME_VAR_HERO_POS_JUMP_DOWN";
                 break;
-                case VAR_HERO_POS_LEFT_RIGHT:
-                s = "VAR_HERO_POS_LEFT_RIGHT";
+                case GAME_VAR_HERO_POS_LEFT_RIGHT:
+                s = "GAME_VAR_HERO_POS_LEFT_RIGHT";
                 break;
-                case VAR_HERO_POS_MASK:
-                s = "VAR_HERO_POS_MASK";
+                case GAME_VAR_HERO_POS_MASK:
+                s = "GAME_VAR_HERO_POS_MASK";
                 break;
-                case VAR_HERO_ACTION_POS_MASK:
-                s = "VAR_HERO_ACTION_POS_MASK";
+                case GAME_VAR_HERO_ACTION_POS_MASK:
+                s = "GAME_VAR_HERO_ACTION_POS_MASK";
                 break;
-                case VAR_PAUSE_SLICES:
-                s = "VAR_PAUSE_SLICES";
+                case GAME_VAR_PAUSE_SLICES:
+                s = "GAME_VAR_PAUSE_SLICES";
                 break;
                 default:
                 snprintf(tmp, 16, "VAR%02X", i);
