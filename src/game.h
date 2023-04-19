@@ -158,8 +158,8 @@ typedef struct {
 } game_audio_desc_t;
 
 typedef struct {
-    const uint8_t*  mem_list;
-    const uint8_t*  banks[0xd];
+    uint8_t*  mem_list;
+    uint8_t*  banks[0xd];
 } game_data_t;
 
 // configuration parameters for game_init()
@@ -167,7 +167,7 @@ typedef struct {
     int                 part_num;               // indicates the part number where the fame starts
     bool                use_ega;                // true to use EGA palette, false to use VGA palette
     game_lang_t         lang;                   // language to use
-    const uint8_t*      demo3_joy;              // contains content of demo3.joy file if present
+    uint8_t*      demo3_joy;              // contains content of demo3.joy file if present
     size_t              demo3_joy_size;
     game_audio_desc_t   audio;
     game_debug_t        debug;
@@ -284,7 +284,7 @@ typedef struct {
             uint8_t         counter;
 
             const uint8_t*  buf_ptr;
-            int             buf_pos, buf_size;
+            size_t          buf_pos, buf_size;
         } demo_joy;
     } input;
 
@@ -299,6 +299,7 @@ void game_key_down(game_t* game, game_input_t input);
 void game_key_up(game_t* game, game_input_t input);
 void game_char_pressed(game_t* game, int c);
 bool game_get_res_buf(game_t* game, int id, uint8_t* dst);
+void game_start(game_t* game, game_data_t data);
 
 #ifdef __cplusplus
 } /* extern "C" */

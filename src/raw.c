@@ -7,15 +7,18 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include "sokol_app.h"
+#include "sokol_args.h"
 #include "sokol_audio.h"
 #include "sokol_gfx.h"
 #include "sokol_glue.h"
 #include "sokol_log.h"
 #include "clock.h"
 #include "gfx.h"
+#include "fs.h"
 #include "common.h"
 #include "game.h"
 #include "raw-data.h"
+#include "miniz.h"
 #if defined(GAME_USE_UI)
     #include "ui.h"
     #include "ui/raw-dasm.h"
@@ -25,10 +28,12 @@
 #endif
 
 static struct {
-    game_t game;
-    uint32_t frame_time_us;
+    bool            ready;
+    game_data_t     data;
+    game_t          game;
+    uint32_t        frame_time_us;
     #ifdef GAME_USE_UI
-        ui_game_t ui;
+        ui_game_t   ui;
     #endif
 } state;
 
@@ -48,20 +53,26 @@ static void ui_draw_cb(void) {
 }
 #endif
 
+static int _to_num(char c) {
+    if(c > '0' && c < '9') {
+        return c - '0';
+    } else if(c > 'a') {
+        return 10 + c - 'a';
+    } else if(c > 'A') {
+        return 10 + c - 'A';
+    }
+    return 0;
+}
+
 static void app_init(void) {
+    clock_init();
+    fs_init();
     game_init(&state.game, &(game_desc_t){
-        .part_num = GAME_PART_WATER,
-        .demo3_joy = dump_DEMO3_JOY,
-        .demo3_joy_size = sizeof(dump_DEMO3_JOY),
+        .part_num = GAME_PART_INTRO,
+// TODO:
+//        .demo3_joy = dump_DEMO3_JOY,
+//        .demo3_joy_size = sizeof(dump_DEMO3_JOY),
         .lang = GAME_LANG_US,
-        .data = {
-            .mem_list = dump_MEMLIST_BIN,
-            .banks[0x0] = dump_BANK01,
-            .banks[0x1] = dump_BANK02,
-            .banks[0x4] = dump_BANK05,
-            .banks[0x5] = dump_BANK06,
-            .banks[0xc] = dump_BANK0D,
-        },
         .audio = {
             .callback = { .func = push_audio },
             .sample_rate = saudio_sample_rate()
@@ -70,8 +81,6 @@ static void app_init(void) {
             .debug = ui_game_get_debug(&state.ui)
         #endif
     });
-    sapp_set_window_title(state.game.title);
-    clock_init();
     gfx_init(&(gfx_desc_t){
         .display_info = game_display_info(&state.game),
         #ifdef GAME_USE_UI
@@ -93,12 +102,73 @@ static void app_init(void) {
             },
         });
     #endif
+
+    if (sargs_exists("file")) {
+        fs_start_load_file(FS_SLOT_IMAGE, sargs_value("file"));
+    }
+}
+
+static void _game_start(void) {
+    game_start(&state.game, state.data);
+    sapp_set_window_title(state.game.title);
+}
+
+bool _game_load_data(gfx_range_t data) {
+    mz_zip_archive archive;
+    mz_zip_zero_struct(&archive);
+    mz_zip_reader_init_mem(&archive, data.ptr, data.size, 0);
+    mz_uint num = mz_zip_reader_get_num_files(&archive);
+    mz_zip_archive_file_stat stat;
+    bool result = false;
+    for(mz_uint i=0; i<num; i++) {
+        mz_zip_reader_file_stat(&archive, i, &stat);
+        if(strncmp(stat.m_filename, "memlist.bin", 11) == 0) {
+            result = true;
+            void* ptr = malloc(stat.m_uncomp_size);
+            mz_zip_reader_extract_to_mem(&archive, i, ptr, stat.m_uncomp_size, 0);
+            state.data.mem_list = ptr;
+        } else if(strncmp(stat.m_filename, "bank", 4) == 0) {
+            result = true;
+            int bank_n = _to_num(stat.m_filename[5]);
+            void* ptr = malloc(stat.m_uncomp_size);
+            mz_zip_reader_extract_to_mem(&archive, i, ptr, stat.m_uncomp_size, 0);
+            state.data.banks[bank_n - 1] = ptr;
+        }
+    }
+    mz_zip_reader_end(&archive);
+    return result;
+}
+
+static void handle_file_loading(void) {
+    fs_dowork();
+    const uint32_t load_delay_frames = 120;
+    if (fs_success(FS_SLOT_IMAGE) && clock_frame_count_60hz() > load_delay_frames) {
+
+        bool load_success = false;
+        if (fs_ext(FS_SLOT_IMAGE, "zip")) {
+            load_success = _game_load_data(fs_data(FS_SLOT_IMAGE));
+        }
+        if (load_success) {
+            state.ready = true;
+            _game_start();
+            if (clock_frame_count_60hz() > (load_delay_frames + 10)) {
+                gfx_flash_success();
+            }
+        }
+        else {
+            gfx_flash_error();
+        }
+        fs_reset(FS_SLOT_IMAGE);
+    }
 }
 
 static void app_frame(void) {
     state.frame_time_us = clock_frame_time();
     gfx_draw(game_display_info(&state.game));
-    game_exec(&state.game, state.frame_time_us/1000);
+    if(state.ready) {
+        game_exec(&state.game, state.frame_time_us/1000);
+    }
+    handle_file_loading();
 }
 
 static void app_cleanup(void) {
@@ -109,56 +179,63 @@ static void app_cleanup(void) {
     #endif
     saudio_shutdown();
     gfx_shutdown();
+    sargs_shutdown();
 }
 
 void app_input(const sapp_event* event) {
+     // accept dropped files also when ImGui grabs input
+    if (event->type == SAPP_EVENTTYPE_FILES_DROPPED) {
+        fs_start_load_dropped_file(FS_SLOT_IMAGE);
+    }
 #ifdef GAME_USE_UI
     if (ui_input(event)) {
         // input was handled by UI
         return;
     }
 #endif
-    switch (event->type) {
-        case SAPP_EVENTTYPE_CHAR: {
-            int c = (int)event->char_code;
-            if ((c > 0x20) && (c < 0x7F)) {
-                game_char_pressed(&state.game, c);
-            }
-        }
-        break;
-        case SAPP_EVENTTYPE_KEY_DOWN:
-        case SAPP_EVENTTYPE_KEY_UP: {
-            game_input_t c;
-            switch (event->key_code) {
-                case SAPP_KEYCODE_LEFT:         c = GAME_INPUT_LEFT; break;
-                case SAPP_KEYCODE_RIGHT:        c = GAME_INPUT_RIGHT; break;
-                case SAPP_KEYCODE_DOWN:         c = GAME_INPUT_DOWN; break;
-                case SAPP_KEYCODE_UP:           c = GAME_INPUT_UP; break;
-                case SAPP_KEYCODE_ENTER:        c = GAME_INPUT_ACTION; break;
-                case SAPP_KEYCODE_SPACE:        c = GAME_INPUT_ACTION; break;
-                case SAPP_KEYCODE_ESCAPE:       c = GAME_INPUT_BACK; break;
-                case SAPP_KEYCODE_F:            c = GAME_INPUT_BACK; break;
-                case SAPP_KEYCODE_C:            c = GAME_INPUT_CODE; break;
-                case SAPP_KEYCODE_P:            c = GAME_INPUT_PAUSE; break;
-                default:                        c = -1; break;
-            }
-            if ((int)c != -1) {
-                if (event->type == SAPP_EVENTTYPE_KEY_DOWN) {
-                    game_key_down(&state.game, c);
-                }
-                else {
-                    game_key_up(&state.game, c);
+    if(state.ready) {
+        switch (event->type) {
+            case SAPP_EVENTTYPE_CHAR: {
+                int c = (int)event->char_code;
+                if ((c > 0x20) && (c < 0x7F)) {
+                    game_char_pressed(&state.game, c);
                 }
             }
             break;
-        default:
-            break;
+            case SAPP_EVENTTYPE_KEY_DOWN:
+            case SAPP_EVENTTYPE_KEY_UP: {
+                game_input_t c;
+                switch (event->key_code) {
+                    case SAPP_KEYCODE_LEFT:         c = GAME_INPUT_LEFT; break;
+                    case SAPP_KEYCODE_RIGHT:        c = GAME_INPUT_RIGHT; break;
+                    case SAPP_KEYCODE_DOWN:         c = GAME_INPUT_DOWN; break;
+                    case SAPP_KEYCODE_UP:           c = GAME_INPUT_UP; break;
+                    case SAPP_KEYCODE_ENTER:        c = GAME_INPUT_ACTION; break;
+                    case SAPP_KEYCODE_SPACE:        c = GAME_INPUT_ACTION; break;
+                    case SAPP_KEYCODE_ESCAPE:       c = GAME_INPUT_BACK; break;
+                    case SAPP_KEYCODE_F:            c = GAME_INPUT_BACK; break;
+                    case SAPP_KEYCODE_C:            c = GAME_INPUT_CODE; break;
+                    case SAPP_KEYCODE_P:            c = GAME_INPUT_PAUSE; break;
+                    default:                        c = -1; break;
+                }
+                if ((int)c != -1) {
+                    if (event->type == SAPP_EVENTTYPE_KEY_DOWN) {
+                        game_key_down(&state.game, c);
+                    }
+                    else {
+                        game_key_up(&state.game, c);
+                    }
+                }
+                break;
+            default:
+                break;
+            }
         }
     }
 }
 
 sapp_desc sokol_main(int argc, char* argv[]) {
-    (void)argc, (void)argv;
+    sargs_setup(&(sargs_desc){ .argc=argc, .argv=argv });
     return (sapp_desc) {
         .init_cb = app_init,
         .event_cb = app_input,
@@ -168,6 +245,7 @@ sapp_desc sokol_main(int argc, char* argv[]) {
         .height = 600,
         .window_title = "RAW",
         .icon.sokol_default = true,
+        .enable_dragndrop = true,
         .logger.func = slog_func,
     };
 }

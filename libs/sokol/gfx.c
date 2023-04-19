@@ -40,6 +40,8 @@ typedef struct {
         sgl_pipeline pip;
         gfx_dim_t dim;
     } icon;
+    int flash_success_count;
+    int flash_error_count;
     struct {
         sg_image images[GFX_DELETE_STACK_SIZE];
         size_t cur_slot;
@@ -280,6 +282,20 @@ void gfx_draw(gfx_display_info_t display_info) {
     sg_draw(0, 4, 1);
     sg_end_pass();
 
+    // tint the clear color red or green if flash feedback is requested
+    if (state.flash_error_count > 0) {
+        state.flash_error_count--;
+        state.display.pass_action.colors[0].value.r = 0.7f;
+    }
+    else if (state.flash_success_count > 0) {
+        state.flash_success_count--;
+        state.display.pass_action.colors[0].value.g = 0.7f;
+    }
+    else {
+        state.display.pass_action.colors[0].value.r = 0.05f;
+        state.display.pass_action.colors[0].value.g = 0.05f;
+    }
+
     // draw the final pass with linear filtering
     sg_begin_default_pass(&state.display.pass_action, display.width, display.height);
     apply_viewport(display, display_info.screen, state.offscreen.pixel_aspect, state.border);
@@ -402,3 +418,12 @@ void gfx_destroy_texture(void* h) {
     }
 }
 
+void gfx_flash_success(void) {
+    assert(state.valid);
+    state.flash_success_count = 20;
+}
+
+void gfx_flash_error(void) {
+    assert(state.valid);
+    state.flash_error_count = 20;
+}

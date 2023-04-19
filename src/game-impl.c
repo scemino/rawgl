@@ -5,6 +5,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <time.h>
 #include "gfx.h"
 #include "common.h"
 #include "game.h"
@@ -1319,6 +1320,7 @@ static void _game_video_copy_bitmap_ptr(game_t* game, const uint8_t *src) {
 // Audio
 
 static void _game_audio_stop_sound(game_t* game, uint8_t channel) {
+    debug(GAME_DBG_SND, "Mixer::stopChannel(%d)", channel);
     game->audio.channels[channel].data = 0;
 }
 
@@ -1382,6 +1384,8 @@ void _game_audio_mix_raw(game_audio_channel_t* chan, int16_t* sample) {
             }
         }
         *sample = mix_i16(*sample, _to_i16(chan->data[pos] ^ 0x80) * chan->volume / 64);
+    } else {
+        *sample = 0;
     }
 }
 
@@ -1678,10 +1682,10 @@ static void _game_res_load(game_t* game) {
 			}
 		}
 		if (me->bank_num == 0) {
-			warning("Resource::load() ec=0x%X (me->bank_num == 0)", 0xF00);
+			warning("Resource::load() ec=0x%X (me->bankNum == 0)", 0xF00);
 			me->status = GAME_RES_STATUS_NULL;
 		} else {
-			debug(GAME_DBG_BANK, "Resource::load() buf_pos=0x%X size=%d type=%d pos=0x%X bank_num=%d", memPtr - game->res.mem, me->packed_size, me->type, me->bank_pos, me->bank_num);
+			debug(GAME_DBG_BANK, "Resource::load() bufPos=0x%X size=%d type=%d pos=0x%X bankNum=%d", memPtr - game->res.mem, me->packed_size, me->type, me->bank_pos, me->bank_num);
 			if (_game_res_read_bank(game, me, memPtr)) {
 				if (me->type == RT_BITMAP) {
 					_game_video_copy_bitmap_ptr(game, game->res.vid_cur_ptr);
@@ -2142,7 +2146,7 @@ static void _op_updateResources(game_t* game) {
 	uint16_t num = _fetch_word(&game->vm.ptr);
 	debug(GAME_DBG_SCRIPT, "Script::op_updateResources(%d)", num);
 	if (num == 0) {
-		_game_audio_stop_all(game);
+        _game_audio_stop_all(game);
 		_game_res_invalidate(game);
 	} else {
 		_game_res_update(game, num);
@@ -2443,23 +2447,42 @@ void game_init(game_t* game, const game_desc_t* desc) {
     memset(game, 0, sizeof(game_t));
     game->valid = true;
     game->debug = desc->debug;
-    game->res.data = desc->data;
+    game->part_num = desc->part_num;
+    game->res.lang = desc->lang;
+    if (desc->demo3_joy_size && game->res.data_type == DT_DOS) {
+		_demo3_joy_read(game, desc->demo3_joy, desc->demo3_joy_size);
+	}
+    game->audio.callback = desc->audio.callback;
+    _game_audio_init(game, desc->audio.callback);
+    game->video.use_ega = desc->use_ega;
+}
+
+void game_start(game_t* game, game_data_t data) {
+    GAME_ASSERT(game && game->valid);
+    game->res.data = data;
 
     g_debugMask = GAME_DBG_INFO | GAME_DBG_VIDEO | GAME_DBG_SND | GAME_DBG_SCRIPT | GAME_DBG_BANK;
-    game->part_num = desc->part_num;
     _game_res_detect_version(game);
     _game_video_init(game);
     game->res.has_password_screen = true;
     game->res.script_bak_ptr = game->res.script_cur_ptr = game->res.mem;
     game->res.vid_cur_ptr = game->res.mem + GAME_MEM_BLOCK_SIZE - (GAME_WIDTH * GAME_HEIGHT / 2); // 4bpp bitmap
-    game->res.lang = desc->lang;
 	_game_res_read_entries(game);
 
     _game_gfx_set_work_page_ptr(game, 2);
 
-    if (desc->demo3_joy_size && game->res.data_type == DT_DOS) {
-		_demo3_joy_read(game, desc->demo3_joy, desc->demo3_joy_size);
-	}
+    game->vm.vars[GAME_VAR_RANDOM_SEED] = time(0);
+#ifdef BYPASS_PROTECTION
+    // these 3 variables are set by the game code
+    game->vm.vars[0xBC] = 0x10;
+    game->vm.vars[0xC6] = 0x80;
+    game->vm.vars[0xF2] = (game->res.data_type == DT_AMIGA || game->res.data_type == DT_ATARI) ? 6000 : 4000;
+    // these 2 variables are set by the engine executable
+    game->vm.vars[0xDC] = 33;
+#endif
+    if (game->res.data_type == DT_DOS) {
+        game->vm.vars[0xE4] = 20;
+    }
 
     switch (game->res.data_type) {
     case DT_DOS:
@@ -2477,10 +2500,7 @@ void game_init(game_t* game, const game_desc_t* desc) {
         }
         break;
     }
-    game->audio.callback = desc->audio.callback;
-    _game_audio_init(game, desc->audio.callback);
 
-    game->video.use_ega = desc->use_ega;
     // bypass protection ?
 #ifndef BYPASS_PROTECTION
         switch (game->res.data_type) {
