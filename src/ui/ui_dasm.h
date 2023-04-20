@@ -175,11 +175,23 @@ static void _ui_dasm_disasm(ui_dasm_t* win) {
     win->str_pos = 0;
     win->bin_pos = 0;
     raw_dasm_op(win->cur_addr, _ui_dasm_in_cb, _ui_dasm_out_cb, win);
-    raw_dasm_op(win->cur_addr, _ui_dasm_in_cb, _ui_dasm_out_cb, win);
 }
 
 static bool _ui_dasm_jumptarget(ui_dasm_t* win, uint16_t pc, uint16_t* out_addr) {
-
+    switch (win->bin_buf[0]) {
+        case 0x04:
+        case 0x07:
+            *out_addr = (win->bin_buf[2] << 8) | win->bin_buf[1];
+            return true;
+        case 0x09:
+            *out_addr = (win->bin_buf[3] << 8) | win->bin_buf[2];
+            return true;
+        case 0x0a:
+            uint8_t op = win->bin_buf[2];
+            uint8_t off = (op & 0x40) ? 2: 1;
+            *out_addr = (win->bin_buf[3+off] << 8) | win->bin_buf[2+off];
+            return true;
+    }
     return false;
 }
 

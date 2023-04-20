@@ -186,7 +186,6 @@ typedef struct ui_dbg_uistate_t {
     bool show_buttons;
     bool show_breakpoints;
     bool show_bytes;
-    bool show_ticks;
     bool show_history;
     bool request_scroll;
     ui_dbg_keys_desc_t keys;
@@ -329,11 +328,19 @@ static inline uint16_t _ui_dbg_disasm_len(ui_dbg_t* win, uint16_t pc) {
 
 /* check if the an instruction is a 'step over' op */
 static bool _ui_dbg_is_stepover_op(uint8_t opcode) {
-   return true;
+   switch(opcode) {
+    case 0x04:
+    return true;
+    }
+    return false;
 }
 
 /* check if an instruction is a control-flow op */
 static bool _ui_dbg_is_controlflow_op(uint8_t opcode0, uint8_t opcode1) {
+    switch(opcode0) {
+    case 0x04: case 0x07: case 0x09: case 0x0a:
+    return true;
+    }
     return false;
 }
 
@@ -447,14 +454,6 @@ static void _ui_dbg_history_draw(ui_dbg_t* win) {
             x += glyph_width * 4;
             ImGui::SameLine(x);
             ImGui::Text("%s", win->dasm.str_buf);
-
-            /* tick count */
-            x += glyph_width * 17;
-            if (win->ui.show_ticks) {
-                int ticks = win->heatmap.items[pc].ticks;
-                ImGui::SameLine(x);
-                ImGui::Text("%d", ticks);
-            }
         }
         clipper.End();
         ImGui::PopStyleVar(2);
@@ -1064,7 +1063,6 @@ static void _ui_dbg_uistate_init(ui_dbg_t* win, ui_dbg_desc_t* desc) {
     ui->show_regs = true;
     ui->show_buttons = true;
     ui->show_bytes = true;
-    ui->show_ticks = true;
     ui->show_history = false;
     ui->show_breakpoints = false;
     ui->keys = desc->keys;
@@ -1163,7 +1161,6 @@ static void _ui_dbg_draw_menu(ui_dbg_t* win) {
             ImGui::MenuItem("Button Bar", 0, &win->ui.show_buttons);
             ImGui::MenuItem("Breakpoints", 0, &win->ui.show_breakpoints);
             ImGui::MenuItem("Opcode Bytes", 0, &win->ui.show_bytes);
-            ImGui::MenuItem("Opcode Ticks", 0, &win->ui.show_ticks);
             ImGui::EndMenu();
         }
         ImGui::EndMenuBar();
@@ -1457,39 +1454,13 @@ static void _ui_dbg_draw_main(ui_dbg_t* win) {
         }
 
         /* disassembled instruction */
-        x += glyph_width * 4;
+        x += glyph_width * 6;
         ImGui::SameLine(x);
         if (show_dasm) {
             ImGui::Text("%s", win->dasm.str_buf);
         }
         else {
             ImGui::Text(" ");
-        }
-
-        /* tick count */
-        x += glyph_width * (is_pc_line ? 18:20);
-        if (win->ui.show_ticks) {
-            int ticks = win->heatmap.items[start_addr].ticks;
-            ImGui::SameLine(x);
-            if (ticks > 0) {
-                if (is_pc_line) {
-                    ImGui::Text("%2d/%d", win->dbg.cur_op_ticks, ticks);
-                }
-                else {
-                    ImGui::Text(" %d", ticks);
-                }
-            }
-            else if (show_dasm) {
-                if (is_pc_line) {
-                    ImGui::Text("%2d/?", win->dbg.cur_op_ticks);
-                }
-                else {
-                    ImGui::Text("?");
-                }
-            }
-            else {
-                ImGui::Text(" ");
-            }
         }
         ImGui::PopStyleColor();
     }

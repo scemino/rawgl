@@ -375,6 +375,38 @@ static void _ui_game_draw_resources(ui_game_t* ui) {
     ImGui::End();
 }
 
+static void _ui_game_draw_threads(ui_game_t* ui) {
+     if (!ui->res.open) {
+        return;
+    }
+    ImGui::SetNextWindowPos(ImVec2((float)ui->res.x, (float)ui->res.y), ImGuiCond_Once);
+    ImGui::SetNextWindowSize(ImVec2((float)ui->res.w, (float)ui->res.h), ImGuiCond_Once);
+    if (ImGui::Begin("Threads", &ui->res.open)) {
+
+        if (ImGui::BeginTable("##threads", 6, ImGuiTableFlags_Resizable | ImGuiTableFlags_NoSavedSettings)) {
+            ImGui::TableSetupColumn("#");
+            ImGui::TableSetupColumn("offset");
+            ImGui::TableHeadersRow();
+
+            for(int i=0; i<64; i++) {
+                uint16_t offset = ui->game->vm.tasks[0][i];
+                
+                if(offset == 0xffff) continue;
+
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::PushID(i);
+                ImGui::Text("%u", i); ImGui::TableNextColumn();
+                ImGui::Text("%x", offset); ImGui::TableNextColumn();
+                ImGui::PopID();
+            }
+            ImGui::EndTable();
+        }
+        ImGui::Separator();
+    }
+    ImGui::End();
+}
+
 static void _ui_game_draw_video(ui_game_t* ui) {
     if (!ui->video.open) {
         return;
@@ -414,6 +446,7 @@ static uint8_t _ui_raw_mem_read(int layer, uint16_t addr, void* user_data) {
     (void)layer;
     game_t* game = (game_t*) user_data;
     uint8_t* pc = game->res.seg_code;
+    if (pc == NULL) return 0;
     return pc[addr];
 }
 
@@ -490,6 +523,7 @@ void ui_game_draw(ui_game_t* ui) {
     GAME_ASSERT(ui && ui->game);
     _ui_game_draw_menu(ui);
     _ui_game_draw_resources(ui);
+    _ui_game_draw_threads(ui);
     _ui_game_draw_video(ui);
     _ui_game_draw_vm(ui);
     for (int i = 0; i < 4; i++) {

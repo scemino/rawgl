@@ -100,11 +100,30 @@ static void _raw_dasm_str(const char* str, raw_dasm_output_t out_cb, void* user_
 }
 
 /* helper function to output an unsigned 8-bit value as hex string */
-static void _raw_dasm_u8(uint8_t val, raw_dasm_output_t out_cb, void* user_data) {
+static void _raw_dasm_hex8(uint8_t val, raw_dasm_output_t out_cb, void* user_data) {
     if (out_cb) {
         out_cb('$', user_data);
         for (int i = 1; i >= 0; i--) {
             out_cb(_raw_dasm_hex[(val>>(i*4)) & 0xF], user_data);
+        }
+    }
+}
+
+static void _raw_dasm_u8(uint8_t val, raw_dasm_output_t out_cb, void* user_data) {
+    if (out_cb) {
+        if (val == 0) {
+            out_cb(_raw_dasm_hex[0], user_data);
+        } else {
+            uint8_t div = 100;
+            bool b = false;
+            for(int i=0; i<3; i++) {
+                uint8_t v = (val / div) % 10;
+                if(b || (v > 0)) {
+                    b = true;
+                    out_cb(_raw_dasm_hex[v & 0xF], user_data);
+                }
+                div /= 10;
+            }
         }
     }
 }
@@ -128,20 +147,20 @@ uint16_t raw_dasm_op(uint16_t pc, raw_dasm_input_t in_cb, raw_dasm_output_t out_
 
     /* opcode name */
     switch (op) {
-        case 0x00: _FETCH_U8(u8); _STR("VAR"); _STR_U8(u8); _CHR('='); _FETCH_I16(i16); _STR_U16(i16); break; // mov const
-        case 0x01: _FETCH_U8(u8); _STR("VAR"); _STR_U8(u8); _CHR('='); _STR("VAR"); _FETCH_U8(u8); _STR_U8(u8); break; // mov
-        case 0x02: _FETCH_U8(u8); _STR("VAR"); _STR_U8(u8); _STR("+="); _STR("VAR"); _FETCH_U8(u8); _STR_U8(u8); break; // add
-        case 0x03: _FETCH_U8(u8); _STR("VAR"); _STR_U8(u8); _STR("+="); _FETCH_I16(i16); _STR_U16(i16); break; // add const
-        case 0x04: _FETCH_U16(u16); _STR("CALL "); _STR_U16(u16); break; // call
-        case 0x05: _STR("RET"); break; // ret
-        case 0x06: _STR("YIELD_TASK"); break; // yield task
-        case 0x07: _FETCH_U16(u16); _STR("JMP"); _STR_U16(u16); break; // jmp
-        case 0x08: _FETCH_U8(u8); _STR("INST_TASK("); _STR_U8(u8); _CHR(','); _FETCH_U16(u16); _STR_U16(u16); _CHR(')'); break; // install task
-        case 0x09: _FETCH_U8(u8); _STR("JMPIF VAR"); _STR_U8(u8); _CHR(','); _FETCH_U16(u16); _STR_U16(u16);  break; // jmpIfVar
+        case 0x00: _FETCH_U8(u8); _STR("set v"); _STR_U8(u8); _CHR(' '); _FETCH_I16(i16); _STR_U16(i16); break; // mov const
+        case 0x01: _FETCH_U8(u8); _STR("seti v"); _STR_U8(u8); _STR(" v"); _FETCH_U8(u8); _STR_U8(u8); break; // mov
+        case 0x02: _FETCH_U8(u8); _STR("addi "); _STR_U8(u8); _STR(" v"); _FETCH_U8(u8); _STR_U8(u8); break; // add
+        case 0x03: _FETCH_U8(u8); _STR("addi "); _STR_U8(u8); _CHR(' '); _FETCH_I16(i16); _STR_U16(i16); break; // add const
+        case 0x04: _FETCH_U16(u16); _STR("jsr "); _STR_U16(u16); break; // call
+        case 0x05: _STR("return"); break; // ret
+        case 0x06: _STR("break"); break; // yield task
+        case 0x07: _FETCH_U16(u16); _STR("jmp "); _STR_U16(u16); break; // jmp
+        case 0x08: _FETCH_U8(u8); _STR("setvec "); _STR_U8(u8); _CHR(' '); _FETCH_U16(u16); _STR_U16(u16); break; // install task
+        case 0x09: _FETCH_U8(u8); _STR("if v"); _STR_U8(u8); _CHR(' '); _FETCH_U16(u16); _STR_U16(u16);  break; // jmpIfVar
         case 0x0a: {
             uint8_t op, v;
             _FETCH_U8(op); _FETCH_U8(v);
-            _STR("IF (VAR"); _STR_U8(v);
+            _STR("if (v"); _STR_U8(v);
             switch (op & 7) {
                 case 0: _STR(" == "); break;
                 case 1: _STR(" != "); break;
@@ -153,40 +172,40 @@ uint16_t raw_dasm_op(uint16_t pc, raw_dasm_input_t in_cb, raw_dasm_output_t out_
             }
             if (op & 0x80) {
                 uint8_t a; _FETCH_U8(a);
-                _STR("VAR"); _STR_U8(a);
+                _STR("v"); _STR_U8(a);
             } else if (op & 0x40) {
                 _FETCH_I16(i16); _STR_U16(i16);
             } else {
                 uint8_t a;
                 _FETCH_U8(a); _STR_U8(a);
             }
-             _STR(") JMP ");
+             _STR(") jmp ");
             _FETCH_I16(i16); _STR_U16(i16);
         } break;
-        case 0x0b: _FETCH_U16(u16); _STR("SETPAL "); _STR_U16(u16);  break; // setPalette
+        case 0x0b: _FETCH_U16(u16); _STR("fade "); _STR_U16(u16);  break; // setPalette
         case 0x0c: _FETCH_U8(u8); _STR("TSK ST "); _STR_U8(u8); _CHR(','); _FETCH_U8(u8); _STR_U8(u8); _CHR(','); _FETCH_U8(u8); _STR_U8(u8); break; // changeTasksState
-        case 0x0d: _FETCH_U8(u8); _STR("SEL PG "); _STR_U8(u8); break; // selectPage
-        case 0x0e: _FETCH_U8(u8); _STR("FILL PG "); _STR_U8(u8); _CHR(','); _FETCH_U8(u8); _STR_U8(u8); break; // selectPage
-        case 0x0f: _FETCH_U8(u8); _STR("CPY PG "); _STR_U8(u8); _CHR(','); _FETCH_U8(u8); _STR_U8(u8); break; // fillPage
-        case 0x10: _FETCH_U8(u8); _STR("UPD DISPLAY "); _STR_U8(u8); break; // updateDisplay
-        case 0x11: _STR("REM TSK"); break; // removeTask
-        case 0x12: _FETCH_U16(u16); _STR("STR "); _STR_U16(u16); _CHR(','); _FETCH_U8(u8); _STR_U8(u8); _CHR(','); _FETCH_U8(u8); _STR_U8(u8); _CHR(','); _FETCH_U8(u8); _STR_U8(u8); break; // drawString
-        case 0x13: _FETCH_U8(u8); _STR("VAR "); _STR_U8(u8); _STR("-="); _FETCH_U8(u8); _STR("VAR "); _STR_U8(u8); break; // sub
-        case 0x14: _FETCH_U8(u8); _STR("VAR "); _STR_U8(u8); _STR("&="); _FETCH_U16(u16); _STR_U16(u16); break; // and
-        case 0x15: _FETCH_U8(u8); _STR("VAR "); _STR_U8(u8); _STR("|="); _FETCH_U16(u16); _STR_U16(u16); break; // or
-        case 0x16: _FETCH_U8(u8); _STR("VAR "); _STR_U8(u8); _STR("<<="); _FETCH_U16(u16); _STR_U16(u16); break; // shl
-        case 0x17: _FETCH_U8(u8); _STR("VAR "); _STR_U8(u8); _STR(">>="); _FETCH_U16(u16); _STR_U16(u16); break; // shr
-        case 0x18: _FETCH_U16(u16); _STR("SND "); _STR_U16(u16); _CHR(','); _FETCH_U8(u8); _STR_U8(u8); _CHR(','); _FETCH_U8(u8); _STR_U8(u8); _CHR(','); _FETCH_U8(u8); _STR_U8(u8); break; // playSound
-        case 0x19: _FETCH_U16(u16); _STR("UPD RES "); _STR_U16(u16); break; // updateResource
-        case 0x1a: _FETCH_U16(u16); _STR("MUS "); _STR_U16(u16); _CHR(','); _FETCH_U16(u16); _STR_U16(u16); _CHR(','); _FETCH_U8(u8); _STR_U8(u8); break; // playMusic
+        case 0x0d: _FETCH_U8(u8); _STR("setws "); _STR_U8(u8); break; // selectPage
+        case 0x0e: _FETCH_U8(u8); _STR("clr "); _STR_U8(u8); _FETCH_U8(u8); _STR_U8(u8); break; // fillPage
+        case 0x0f: _FETCH_U8(u8); _STR("copy "); _STR_U8(u8); _FETCH_U8(u8); _STR_U8(u8); break; // copyPage
+        case 0x10: _FETCH_U8(u8); _STR("show "); _STR_U8(u8); break; // updateDisplay
+        case 0x11: _STR("bigend"); break; // removeTask
+        case 0x12: _FETCH_U16(u16); _STR("text "); _STR_U16(u16); _CHR(' '); _FETCH_U8(u8); _STR_U8(u8); _CHR(' '); _FETCH_U8(u8); _STR_U8(u8); _CHR(' '); _FETCH_U8(u8); _STR_U8(u8); break; // text "text number", x, y, color
+        case 0x13: _FETCH_U8(u8); _STR("v"); _STR_U8(u8); _STR("-="); _FETCH_U8(u8); _STR("v "); _STR_U8(u8); break; // sub
+        case 0x14: _FETCH_U8(u8); _STR("v"); _STR_U8(u8); _STR("&="); _FETCH_U16(u16); _STR_U16(u16); break; // and
+        case 0x15: _FETCH_U8(u8); _STR("v"); _STR_U8(u8); _STR("|="); _FETCH_U16(u16); _STR_U16(u16); break; // or
+        case 0x16: _FETCH_U8(u8); _STR("v"); _STR_U8(u8); _STR("<<="); _FETCH_U16(u16); _STR_U16(u16); break; // shl
+        case 0x17: _FETCH_U8(u8); _STR("v"); _STR_U8(u8); _STR(">>="); _FETCH_U16(u16); _STR_U16(u16); break; // shr
+        case 0x18: _FETCH_U16(u16); _STR("play "); _STR_U16(u16); _CHR(' '); _FETCH_U8(u8); _STR_U8(u8); _CHR(' '); _FETCH_U8(u8); _STR_U8(u8); _CHR(' '); _FETCH_U8(u8); _STR_U8(u8); break; // playSound
+        case 0x19: _FETCH_U16(u16); _STR("load "); _STR_U16(u16); break; // updateResource
+        case 0x1a: _FETCH_U16(u16); _STR("song "); _STR_U16(u16); _CHR(' '); _FETCH_U16(u16); _STR_U16(u16); _CHR(' '); _FETCH_U8(u8); _STR_U8(u8); break; // playMusic
         default:
             if(op & 0x80) {
                 uint8_t x, y;
                 _FETCH_U8(u8); _FETCH_U8(x); _FETCH_U8(y);
-                _STR("drawShape(0xFF, 64, "); _STR_U8(x); _STR(", "); _STR_U8(y); _CHR(')');
+                _STR("spr ");  _STR_U8(x); _CHR(' '); _STR_U8(x); _STR(" "); _STR_U8(y); _CHR(' ');
             } else if(op & 0x40) {
                 _FETCH_U8(u8); _FETCH_U8(u8);
-                _STR("drawShape(0xFF, ");
+                _STR("spr ");
                 if (!(op & 0x20)) {
                     if (!(op & 0x10)) {
                         int16_t x;
@@ -194,7 +213,7 @@ uint16_t raw_dasm_op(uint16_t pc, raw_dasm_input_t in_cb, raw_dasm_output_t out_
                         _STR_U16(x);
                     } else {
                         _FETCH_U8(u8);
-                        _STR("VAR"); _STR_U8(u8);
+                        _STR("v"); _STR_U8(u8);
                     }
                 } else {
                     _FETCH_U8(u8);
@@ -204,7 +223,7 @@ uint16_t raw_dasm_op(uint16_t pc, raw_dasm_input_t in_cb, raw_dasm_output_t out_
                     }
                     _STR_U16(x);
                 }
-                _STR(", ");
+                _STR(" ");
                 _FETCH_U8(u8);
                 int16_t y = u8;
                 if (!(op & 8)) {
@@ -213,16 +232,16 @@ uint16_t raw_dasm_op(uint16_t pc, raw_dasm_input_t in_cb, raw_dasm_output_t out_
                         y = (y << 8) | u8;
                         _STR_U16(y);
                     } else {
-                        _STR("VAR"); _STR_U8(u8);
+                        _STR("v"); _STR_U8(u8);
                     }
                 } else {
                     _STR_U16(y);
                 }
-                _STR(", ");
+                _STR(" ");
                 if (!(op & 2)) {
                     if (op & 1) {
                         _FETCH_U8(u8);
-                        _STR("VAR"); _STR_U8(u8);
+                        _STR("v"); _STR_U8(u8);
                     } else {
                         _STR("64");
                     }
@@ -234,7 +253,6 @@ uint16_t raw_dasm_op(uint16_t pc, raw_dasm_input_t in_cb, raw_dasm_output_t out_
                         _STR("64");
                     }
                 }
-                _CHR(')');
             } else {
                 _STR("???");
             }
