@@ -100,12 +100,22 @@ static int _to_num(char c) {
 static void app_init(void) {
     clock_init();
     fs_init();
+    int part = GAME_PART_INTRO;
+    game_lang_t lang = GAME_LANG_US;
+    if (sargs_exists("part")) {
+        part = atoi(sargs_value("part"));
+    }
+    if (sargs_exists("lang")) {
+        lang = strcmp(sargs_value("lang"), "fr") == 0 ? GAME_LANG_FR : GAME_LANG_US;
+    }
+    bool use_ega = sargs_exists("use_ega");
     game_init(&state.game, &(game_desc_t){
-        .part_num = GAME_PART_INTRO,
+        .part_num = part,
+        .use_ega = use_ega,
 // TODO:
 //        .demo3_joy = dump_DEMO3_JOY,
 //        .demo3_joy_size = sizeof(dump_DEMO3_JOY),
-        .lang = GAME_LANG_US,
+        .lang = lang,
         .audio = {
             .callback = { .func = push_audio },
             .sample_rate = saudio_sample_rate()
