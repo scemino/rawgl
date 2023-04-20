@@ -42,6 +42,7 @@ typedef struct {
     } icon;
     int flash_success_count;
     int flash_error_count;
+    sg_image empty_snapshot_texture;
     struct {
         sg_image images[GFX_DELETE_STACK_SIZE];
         size_t cur_slot;
@@ -74,6 +75,46 @@ static const float gfx_verts_flipped_rot[] = {
     0.0f, 1.0f, 0.0f, 1.0f,
     1.0f, 1.0f, 0.0f, 0.0f
 };
+
+static sg_image gfx_create_icon_texture(const uint8_t* packed_pixels, int width, int height, int stride, sg_filter filter) {
+    // textures must be 2^n for WebGL
+    const size_t pixel_data_size = width * height * sizeof(uint32_t);
+    uint32_t* pixels = malloc(pixel_data_size);
+    assert(pixels);
+    memset(pixels, 0, pixel_data_size);
+    const uint8_t* src = packed_pixels;
+    uint32_t* dst = pixels;
+    for (int y = 0; y < height; y++) {
+        uint8_t bits = 0;
+        dst = pixels + (y * width);
+        for (int x = 0; x < width; x++) {
+            if ((x & 7) == 0) {
+                bits = *src++;
+            }
+            if (bits & 1) {
+                *dst++ = 0xFFFFFFFF;
+            }
+            else {
+                *dst++ = 0x00FFFFFF;
+            }
+            bits >>= 1;
+        }
+    }
+    assert(src == packed_pixels + stride * height); (void)stride;   // stride is unused in release mode
+    assert(dst <= pixels + (width * height));
+    sg_image img = sg_make_image(&(sg_image_desc){
+        .pixel_format = SG_PIXELFORMAT_RGBA8,
+        .width = width,
+        .height = height,
+        .min_filter = filter,
+        .mag_filter = filter,
+        .wrap_u = SG_WRAP_CLAMP_TO_EDGE,
+        .wrap_v = SG_WRAP_CLAMP_TO_EDGE,
+        .data.subimage[0][0] = { .ptr=pixels, .size=pixel_data_size }
+    });
+    free(pixels);
+    return img;
+}
 
 // this function will be called at init time and when the emulator framebuffer size changes
 static void gfx_init_images_and_pass(void) {
@@ -111,6 +152,36 @@ static void gfx_init_images_and_pass(void) {
         .color_attachments[0].image = state.offscreen.img
     });
 }
+
+static const struct {
+    int width;
+    int height;
+    int stride;
+    uint8_t pixels[32];
+} empty_snapshot_icon = {
+    .width = 16,
+    .height = 16,
+    .stride = 2,
+    .pixels = {
+        0xFF,0xFF,
+        0x03,0xC0,
+        0x05,0xA0,
+        0x09,0x90,
+        0x11,0x88,
+        0x21,0x84,
+        0x41,0x82,
+        0x81,0x81,
+        0x81,0x81,
+        0x41,0x82,
+        0x21,0x84,
+        0x11,0x88,
+        0x09,0x90,
+        0x05,0xA0,
+        0x03,0xC0,
+        0xFF,0xFF,
+
+    }
+};
 
 void gfx_init(const gfx_desc_t* desc) {
     sg_setup(&(sg_desc){
@@ -193,6 +264,14 @@ void gfx_init(const gfx_desc_t* desc) {
         },
         .primitive_type = SG_PRIMITIVETYPE_TRIANGLE_STRIP
     });
+
+    // create an icon texture for an empty snapshot
+    state.empty_snapshot_texture = gfx_create_icon_texture(
+        empty_snapshot_icon.pixels,
+        empty_snapshot_icon.width,
+        empty_snapshot_icon.height,
+        empty_snapshot_icon.stride,
+        SG_FILTER_NEAREST);
 
     // create image and pass resources
     gfx_init_images_and_pass();
@@ -426,4 +505,8 @@ void gfx_flash_success(void) {
 void gfx_flash_error(void) {
     assert(state.valid);
     state.flash_error_count = 20;
+}
+
+void* gfx_shared_empty_snapshot_texture(void) {
+    return (void*)(uintptr_t)state.empty_snapshot_texture.id;
 }

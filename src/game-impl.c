@@ -2638,6 +2638,49 @@ bool game_get_res_buf(game_t* game, int id, uint8_t* dst) {
     return _game_res_read_bank(game, me, dst);
 }
 
+void game_audio_callback_snapshot_onsave(game_audio_callback_t* snapshot) {
+    snapshot->func = 0;
+    snapshot->user_data = 0;
+}
+
+void game_audio_callback_snapshot_onload(game_audio_callback_t* snapshot, game_audio_callback_t* sys) {
+    snapshot->func = sys->func;
+    snapshot->user_data = sys->user_data;
+}
+
+void game_debug_snapshot_onsave(game_debug_t* snapshot) {
+    snapshot->callback.func = 0;
+    snapshot->callback.user_data = 0;
+    snapshot->stopped = 0;
+}
+
+void game_debug_snapshot_onload(game_debug_t* snapshot, game_debug_t* sys) {
+    snapshot->callback.func = sys->callback.func;
+    snapshot->callback.user_data = sys->callback.user_data;
+    snapshot->stopped = sys->stopped;
+}
+
+bool game_load_snapshot(game_t* game, uint32_t version, game_t* src) {
+    GAME_ASSERT(game && src);
+    if (version != GAME_SNAPSHOT_VERSION) {
+        return false;
+    }
+    static game_t im;
+    im = *src;
+    game_debug_snapshot_onload(&im.debug, &game->debug);
+    game_audio_callback_snapshot_onload(&im.audio.callback, &game->audio.callback);
+    *game = im;
+    return true;
+}
+
+uint32_t game_save_snapshot(game_t* game, game_t* dst) {
+    GAME_ASSERT(game && dst);
+    *dst = *game;
+    game_debug_snapshot_onsave(&dst->debug);
+    game_audio_callback_snapshot_onsave(&dst->audio.callback);
+    return GAME_SNAPSHOT_VERSION;
+}
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

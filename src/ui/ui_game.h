@@ -70,6 +70,7 @@ typedef struct {
 typedef struct {
     game_t* game;
     ui_dbg_texture_callbacks_t dbg_texture;     // debug texture create/update/destroy callbacks
+    ui_snapshot_desc_t snapshot;                // snapshot ui setup params
 } ui_game_desc_t;
 
 typedef struct {
@@ -79,6 +80,7 @@ typedef struct {
     ui_game_vm_t vm;
     ui_dasm_t dasm[4];
     ui_dbg_t dbg;
+    ui_snapshot_t snapshot;
 } ui_game_t;
 
 void ui_game_init(ui_game_t* ui, const ui_game_desc_t* desc);
@@ -109,6 +111,7 @@ static void _ui_game_draw_menu(ui_game_t* ui) {
     GAME_ASSERT(ui && ui->game);
     if (ImGui::BeginMainMenuBar()) {
         if (ImGui::BeginMenu("System")) {
+            ui_snapshot_menus(&ui->snapshot);
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Info")) {
@@ -418,6 +421,7 @@ void ui_game_init(ui_game_t* ui, const ui_game_desc_t* ui_desc) {
     GAME_ASSERT(ui && ui_desc);
     GAME_ASSERT(ui_desc->game);
     ui->game = ui_desc->game;
+    ui_snapshot_init(&ui->snapshot, &ui_desc->snapshot);
     {
         ui_dbg_desc_t desc = {0};
         desc.title = "CPU Debugger";

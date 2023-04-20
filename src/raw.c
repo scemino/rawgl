@@ -24,8 +24,14 @@
     #include "ui/raw-dasm.h"
     #include "ui/ui_dasm.h"
     #include "ui/ui_dbg.h"
+    #include "ui/ui_snapshot.h"
     #include "ui/ui_game.h"
 #endif
+
+typedef struct {
+    uint32_t    version;
+    game_t      game;
+} game_snapshot_t;
 
 static struct {
     bool            ready;
@@ -34,6 +40,7 @@ static struct {
     uint32_t        frame_time_us;
     #ifdef GAME_USE_UI
         ui_game_t   ui;
+        game_snapshot_t snapshots[UI_SNAPSHOT_MAX_SLOTS];
     #endif
 } state;
 
@@ -50,6 +57,32 @@ static void push_audio(const float* samples, int num_samples, void* user_data) {
 #if defined(GAME_USE_UI)
 static void ui_draw_cb(void) {
     ui_game_draw(&state.ui);
+}
+
+static void ui_update_snapshot_screenshot(size_t slot) {
+    ui_snapshot_screenshot_t screenshot = {
+        .texture = gfx_create_screenshot_texture(game_display_info(&state.snapshots[slot].game))
+    };
+    ui_snapshot_screenshot_t prev_screenshot = ui_snapshot_set_screenshot(&state.ui.snapshot, slot, screenshot);
+    if (prev_screenshot.texture) {
+        gfx_destroy_texture(prev_screenshot.texture);
+    }
+}
+
+static bool ui_load_snapshot(size_t slot) {
+    bool success = false;
+    if ((slot < UI_SNAPSHOT_MAX_SLOTS) && (state.ui.snapshot.slots[slot].valid)) {
+        success = game_load_snapshot(&state.game, state.snapshots[slot].version, &state.snapshots[slot].game);
+    }
+    return success;
+}
+
+static void ui_save_snapshot(size_t slot) {
+    if (slot < UI_SNAPSHOT_MAX_SLOTS) {
+        state.snapshots[slot].version = game_save_snapshot(&state.game, &state.snapshots[slot].game);
+        ui_update_snapshot_screenshot(slot);
+        fs_save_snapshot("raw", slot, (gfx_range_t){ .ptr = &state.snapshots[slot], sizeof(gfx_range_t) });
+    }
 }
 #endif
 
@@ -100,6 +133,13 @@ static void app_init(void) {
                 .update_cb = gfx_update_texture,
                 .destroy_cb = gfx_destroy_texture,
             },
+            .snapshot = {
+                .load_cb = ui_load_snapshot,
+                .save_cb = ui_save_snapshot,
+                .empty_slot_screenshot = {
+                    .texture = gfx_shared_empty_snapshot_texture(),
+                }
+            }
         });
     #endif
 

@@ -13,4 +13,5 @@
 #include "ui/raw-dasm.h"
 #include "ui/ui_dbg.h"
 #include "ui/ui_dasm.h"
+#include "ui/ui_snapshot.h"
 #include "ui/ui_game.h"

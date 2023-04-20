@@ -59,6 +59,7 @@ void gfx_destroy_texture(void* h);
 void* gfx_create_screenshot_texture(gfx_display_info_t display_info);
 void gfx_flash_success(void);
 void gfx_flash_error(void);
+void* gfx_shared_empty_snapshot_texture(void);
 
 #ifdef __cplusplus
 } /* extern "C" */

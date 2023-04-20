@@ -51,7 +51,10 @@ extern "C" {
 #define GAME_PART_FINAL                 (16007)
 #define GAME_PART_PASSWORD              (16008)
 
-#define GAME_QUAD_STRIP_MAX_VERTICES (70)
+#define GAME_QUAD_STRIP_MAX_VERTICES    (70)
+
+// bump when nes_t memory layout changes
+#define GAME_SNAPSHOT_VERSION           (0x0001)
 
 typedef enum  {
 	GAME_LANG_FR,
@@ -300,6 +303,17 @@ void game_key_up(game_t* game, game_input_t input);
 void game_char_pressed(game_t* game, int c);
 bool game_get_res_buf(game_t* game, int id, uint8_t* dst);
 void game_start(game_t* game, game_data_t data);
+
+// prepare chips_audio_t snapshot for saving
+void game_audio_callback_snapshot_onsave(game_audio_callback_t* snapshot);
+// fixup chips_audio_t snapshot after loading
+void game_audio_callback_snapshot_onload(game_audio_callback_t* snapshot, game_audio_callback_t* sys);
+// prepare chips_debut_t snapshot for saving
+void game_debug_snapshot_onsave(game_debug_t* snapshot);
+// fixup chips_debug_t snapshot after loading
+void game_debug_snapshot_onload(game_debug_t* snapshot, game_debug_t* sys);
+bool game_load_snapshot(game_t* game, uint32_t version, game_t* src);
+uint32_t game_save_snapshot(game_t* game, game_t* dst);
 
 #ifdef __cplusplus
 } /* extern "C" */
