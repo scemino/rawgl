@@ -59,6 +59,7 @@ typedef struct {
     void* tex_bmp;
     uint8_t buf[GAME_WIDTH*GAME_HEIGHT*4];
     int selected;
+    bool filters[7];
 } ui_game_res_t;
 
 typedef struct {
@@ -146,53 +147,76 @@ static void _ui_game_draw_vm(ui_game_t* ui) {
     }
     ImGui::SetNextWindowPos(ImVec2((float)ui->vm.x, (float)ui->vm.y), ImGuiCond_Once);
     ImGui::SetNextWindowSize(ImVec2((float)ui->vm.w, (float)ui->vm.h), ImGuiCond_Once);
-    if (ImGui::Begin("Variables", &ui->vm.open)) {
-        for(int i=0; i<256; i++) {
-            const char* s = NULL;
-            char tmp[16];
-            switch(i) {
-                case GAME_VAR_RANDOM_SEED:
-                s = "RANDOM_SEED";
-                break;
-                case GAME_VAR_SCREEN_NUM:
-                s = "SCREEN_NUM";
-                break;
-                case GAME_VAR_LAST_KEYCHAR:
-                s = "LAST_KEYCHAR";
-                break;
-                case GAME_VAR_HERO_POS_UP_DOWN:
-                s = "HERO_POS_UP_DOWN";
-                break;
-                case GAME_VAR_MUSIC_SYNC:
-                s = "MUSIC_SYNC";
-                break;
-                case GAME_VAR_SCROLL_Y:
-                s = "SCROLL_Y";
-                break;
-                case GAME_VAR_HERO_ACTION:
-                s = "HERO_ACTION";
-                break;
-                case GAME_VAR_HERO_POS_JUMP_DOWN:
-                s = "GAME_VAR_HERO_POS_JUMP_DOWN";
-                break;
-                case GAME_VAR_HERO_POS_LEFT_RIGHT:
-                s = "GAME_VAR_HERO_POS_LEFT_RIGHT";
-                break;
-                case GAME_VAR_HERO_POS_MASK:
-                s = "GAME_VAR_HERO_POS_MASK";
-                break;
-                case GAME_VAR_HERO_ACTION_POS_MASK:
-                s = "GAME_VAR_HERO_ACTION_POS_MASK";
-                break;
-                case GAME_VAR_PAUSE_SLICES:
-                s = "GAME_VAR_PAUSE_SLICES";
-                break;
-                default:
-                snprintf(tmp, 16, "v%u", i);
-                s = tmp;
-                break;
+    if (ImGui::Begin("Virtual machine", &ui->vm.open)) {
+        if (ImGui::CollapsingHeader("Variables", ImGuiTreeNodeFlags_DefaultOpen)) {
+            for(int i=0; i<256; i++) {
+                const char* s = NULL;
+                char tmp[16];
+                switch(i) {
+                    case GAME_VAR_RANDOM_SEED:
+                    s = "RANDOM_SEED";
+                    break;
+                    case GAME_VAR_SCREEN_NUM:
+                    s = "SCREEN_NUM";
+                    break;
+                    case GAME_VAR_LAST_KEYCHAR:
+                    s = "LAST_KEYCHAR";
+                    break;
+                    case GAME_VAR_HERO_POS_UP_DOWN:
+                    s = "HERO_POS_UP_DOWN";
+                    break;
+                    case GAME_VAR_MUSIC_SYNC:
+                    s = "MUSIC_SYNC";
+                    break;
+                    case GAME_VAR_SCROLL_Y:
+                    s = "SCROLL_Y";
+                    break;
+                    case GAME_VAR_HERO_ACTION:
+                    s = "HERO_ACTION";
+                    break;
+                    case GAME_VAR_HERO_POS_JUMP_DOWN:
+                    s = "GAME_VAR_HERO_POS_JUMP_DOWN";
+                    break;
+                    case GAME_VAR_HERO_POS_LEFT_RIGHT:
+                    s = "GAME_VAR_HERO_POS_LEFT_RIGHT";
+                    break;
+                    case GAME_VAR_HERO_POS_MASK:
+                    s = "GAME_VAR_HERO_POS_MASK";
+                    break;
+                    case GAME_VAR_HERO_ACTION_POS_MASK:
+                    s = "GAME_VAR_HERO_ACTION_POS_MASK";
+                    break;
+                    case GAME_VAR_PAUSE_SLICES:
+                    s = "GAME_VAR_PAUSE_SLICES";
+                    break;
+                    default:
+                    snprintf(tmp, 16, "v%u", i);
+                    s = tmp;
+                    break;
+                }
+                ImGui::Text("%s = %d", s, ui->game->vm.vars[i]);
             }
-            ImGui::Text("%s = %d", s, ui->game->vm.vars[i]);
+        }
+        if (ImGui::CollapsingHeader("Tasks", ImGuiTreeNodeFlags_DefaultOpen)) {
+            if (ImGui::BeginTable("##tasks", 6, ImGuiTableFlags_Resizable | ImGuiTableFlags_NoSavedSettings)) {
+                ImGui::TableSetupColumn("#");
+                ImGui::TableSetupColumn("offset");
+                ImGui::TableHeadersRow();
+
+                for(int i=0; i<64; i++) {
+                    uint16_t offset = ui->game->vm.tasks[0][i];
+
+                    if(offset == 0xffff) continue;
+
+                    ImGui::TableNextRow();
+                    ImGui::TableNextColumn();
+                    ImGui::PushID(i);
+                    ImGui::Text("%u", i); ImGui::TableNextColumn();
+                    ImGui::Text("%x", offset); ImGui::TableNextColumn();
+                    ImGui::PopID();
+                }
+                ImGui::EndTable();
+            }
         }
     }
     ImGui::End();
@@ -321,6 +345,22 @@ static void _ui_game_draw_resources(ui_game_t* ui) {
     ImGui::SetNextWindowSize(ImVec2((float)ui->res.w, (float)ui->res.h), ImGuiCond_Once);
     if (ImGui::Begin("Resources", &ui->res.open)) {
 
+        static const char* labels[] = {"Sound", "Music", "Bitmap", "Palette", "Byte code", "Shape", "Bank" };
+        for (int i = 0; i < 7; i++)
+        {
+            if (i > 0)
+                ImGui::SameLine();
+            ImGui::PushID(i);
+            ImGui::PushStyleColor(ImGuiCol_Button, (ImVec4)ImColor::HSV(i / 7.0f, 0.6f, 0.6f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, (ImVec4)ImColor::HSV(i / 7.0f, 0.7f, 0.7f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, (ImVec4)ImColor::HSV(i / 7.0f, 0.8f, 0.8f));
+            if(ImGui::Button(labels[i])) {
+                ui->res.filters[i] = !ui->res.filters[i];
+            }
+            ImGui::PopStyleColor(3);
+            ImGui::PopID();
+        }
+
         if (ImGui::BeginTable("##resources", 6, ImGuiTableFlags_Resizable | ImGuiTableFlags_NoSavedSettings)) {
             ImGui::TableSetupColumn("#");
             ImGui::TableSetupColumn("Type");
@@ -333,7 +373,9 @@ static void _ui_game_draw_resources(ui_game_t* ui) {
                 game_mem_entry_t* e = &ui->game->res.mem_list[i];
                 if(e->status == 0xFF) break;
 
-                ImGui::TableNextRow();
+                if(ui->res.filters[e->type]) continue;
+
+                ImGui::TableNextRow(0, 20.f);
                 ImGui::TableNextColumn();
                 ImGui::PushID(i);
                 char status_text[256];
@@ -342,16 +384,10 @@ static void _ui_game_draw_resources(ui_game_t* ui) {
                     ui->res.selected = i;
                 }
                 ImGui::TableNextColumn();
-                game_res_type_t t = (game_res_type_t)e->type;
-                switch(t) {
-                    case RT_SOUND: ImGui::Text("Sound"); break;
-                    case RT_MUSIC: ImGui::Text("Music"); break;
-                    case RT_BITMAP: ImGui::Text("Bitmap"); break;
-                    case RT_PALETTE: ImGui::Text("Palette"); break;
-                    case RT_BYTECODE: ImGui::Text("Byte code"); break;
-                    case RT_SHAPE: ImGui::Text("Shape"); break;
-                    case RT_BANK: ImGui::Text("Bank"); break;
-                }
+                static const char* labels[]  = {"Sound", "Music", "Bitmap", "Palette", "Byte code", "Shape", "Bank"};
+                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 0));
+                ImGui::ColorButton("##color", ImColor::HSV(e->type / 7.0f, 0.6f, 0.6f), ImGuiColorEditFlags_NoTooltip); ImGui::SameLine(); ImGui::Text(labels[e->type]);
+                ImGui::PopStyleVar();
 
                 ImGui::TableNextColumn();
                 ImGui::Text("%02X", e->bank_num); ImGui::TableNextColumn();
@@ -363,38 +399,6 @@ static void _ui_game_draw_resources(ui_game_t* ui) {
         }
         ImGui::Separator();
         _ui_game_draw_sel_res(ui);
-    }
-    ImGui::End();
-}
-
-static void _ui_game_draw_tasks(ui_game_t* ui) {
-     if (!ui->res.open) {
-        return;
-    }
-    ImGui::SetNextWindowPos(ImVec2((float)ui->res.x, (float)ui->res.y), ImGuiCond_Once);
-    ImGui::SetNextWindowSize(ImVec2((float)ui->res.w, (float)ui->res.h), ImGuiCond_Once);
-    if (ImGui::Begin("Tasks", &ui->res.open)) {
-
-        if (ImGui::BeginTable("##tasks", 6, ImGuiTableFlags_Resizable | ImGuiTableFlags_NoSavedSettings)) {
-            ImGui::TableSetupColumn("#");
-            ImGui::TableSetupColumn("offset");
-            ImGui::TableHeadersRow();
-
-            for(int i=0; i<64; i++) {
-                uint16_t offset = ui->game->vm.tasks[0][i];
-
-                if(offset == 0xffff) continue;
-
-                ImGui::TableNextRow();
-                ImGui::TableNextColumn();
-                ImGui::PushID(i);
-                ImGui::Text("%u", i); ImGui::TableNextColumn();
-                ImGui::Text("%x", offset); ImGui::TableNextColumn();
-                ImGui::PopID();
-            }
-            ImGui::EndTable();
-        }
-        ImGui::Separator();
     }
     ImGui::End();
 }
@@ -498,7 +502,6 @@ void ui_game_draw(ui_game_t* ui) {
     GAME_ASSERT(ui && ui->game);
     _ui_game_draw_menu(ui);
     _ui_game_draw_resources(ui);
-    _ui_game_draw_tasks(ui);
     _ui_game_draw_video(ui);
     _ui_game_draw_vm(ui);
     ui_dbg_draw(&ui->dbg);
