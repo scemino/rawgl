@@ -52,8 +52,8 @@ enum {
     UI_DBG_BREAKTYPE_EXEC,      /* break on executed address */
     UI_DBG_BREAKTYPE_BYTE,      /* break on a specific 8-bit value at address */
     UI_DBG_BREAKTYPE_WORD,      /* break on a specific 16-bit value at address */
-    UI_DBG_BREAKTYPE_IRQ,       /* break on maskable interrupt */
-    UI_DBG_BREAKTYPE_NMI,       /* break on non-maskable interrupt */
+    UI_DBG_BREAKTYPE_OUT,       /* break on a raw out operation */
+    UI_DBG_BREAKTYPE_IN,        /* break on a raw in operation */
     UI_DBG_BREAKTYPE_USER,      /* user breakpoint types start here */
 };
 #define UI_DBG_MAX_BREAKTYPES (UI_DBG_BREAKTYPE_USER + UI_DBG_MAX_USER_BREAKTYPES)
@@ -72,8 +72,7 @@ enum {
 enum {
     UI_DBG_STEPMODE_NONE = 0,
     UI_DBG_STEPMODE_INTO,
-    UI_DBG_STEPMODE_OVER,
-    UI_DBG_STEPMODE_TICK,
+    UI_DBG_STEPMODE_OVER
 };
 
 /* a breakpoint description */
@@ -119,7 +118,6 @@ typedef struct ui_dbg_keys_desc_t {
     ui_dbg_key_desc_t stop;
     ui_dbg_key_desc_t step_over;
     ui_dbg_key_desc_t step_into;
-    ui_dbg_key_desc_t step_tick;
     ui_dbg_key_desc_t toggle_breakpoint;
 } ui_dbg_keys_desc_t;
 
@@ -181,8 +179,6 @@ typedef struct ui_dbg_uistate_t {
     bool open;
     float init_x, init_y;
     float init_w, init_h;
-    bool show_heatmap;
-    bool show_regs;
     bool show_buttons;
     bool show_breakpoints;
     bool show_bytes;
@@ -328,11 +324,7 @@ static inline uint16_t _ui_dbg_disasm_len(ui_dbg_t* win, uint16_t pc) {
 
 /* check if the an instruction is a 'step over' op */
 static bool _ui_dbg_is_stepover_op(uint8_t opcode) {
-   switch(opcode) {
-    case 0x04:
-    return true;
-    }
-    return false;
+    return opcode == 0x04;
 }
 
 /* check if an instruction is a control-flow op */
@@ -372,12 +364,6 @@ static void _ui_dbg_step_over(ui_dbg_t* win) {
     else {
         win->dbg.step_mode = UI_DBG_STEPMODE_INTO;
     }
-}
-
-static void _ui_dbg_step_tick(ui_dbg_t* win) {
-    win->dbg.stopped = false;
-    win->dbg.step_mode = UI_DBG_STEPMODE_TICK;
-    win->ui.request_scroll = true;
 }
 
 /*== HISTORY =================================================================*/
@@ -557,10 +543,12 @@ static int _ui_dbg_eval_tick_breakpoints(ui_dbg_t* win, int trap_id, uint64_t pi
         const ui_dbg_breakpoint_t* bp = &win->dbg.breakpoints[i];
         if (bp->enabled) {
             switch (bp->type) {
-                case UI_DBG_BREAKTYPE_IRQ:
-                    break;
-
-                case UI_DBG_BREAKTYPE_NMI:
+                case UI_DBG_BREAKTYPE_OUT:
+                case UI_DBG_BREAKTYPE_IN:
+                    const uint16_t mask = bp->val;
+                    if((win->dbg.game->vm.ptr.pc - win->dbg.game->res.seg_code) == (bp->addr & mask)) {
+                        trap_id = UI_DBG_BP_BASE_TRAPID + i;
+                    }
                     break;
             }
         }
@@ -940,117 +928,6 @@ static void _ui_dbg_heatmap_update(ui_dbg_t* win) {
     win->update_texture_cb(win->heatmap.texture, win->heatmap.pixels, 256*256*4);
 }
 
-static void _ui_dbg_heatmap_draw(ui_dbg_t* win) {
-    if (!win->ui.show_heatmap) {
-        return;
-    }
-    ui_dbg_heatmap_t* hm = &win->heatmap;
-
-    if (hm->next_tex_width != hm->tex_width) {
-        _ui_dbg_heatmap_update_texture_size(win, hm->next_tex_width);
-    }
-    if (hm->autoclear_interval > 0) {
-        if ((win->dbg.frame_id % hm->autoclear_interval) == 0) {
-            _ui_dbg_heatmap_clear_all(win);
-        }
-    }
-    _ui_dbg_heatmap_update(win);
-    ImGui::SetNextWindowPos(ImVec2(win->ui.init_x + win->ui.init_w, win->ui.init_y + 128), ImGuiCond_Once);
-    ImGui::SetNextWindowSize(ImVec2(292, 400), ImGuiCond_Once);
-    if (ImGui::Begin("Memory Heatmap", &win->ui.show_heatmap)) {
-        if (ImGui::Button("Clear All")) {
-            _ui_dbg_heatmap_clear_all(win);
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Clear R/W")) {
-            _ui_dbg_heatmap_clear_rw(win);
-        }
-        ImGui::SameLine();
-        ImGui::PushStyleColor(ImGuiCol_Text, 0xFF0000FF);
-        ImGui::Checkbox("OP", &hm->show_ops); ImGui::SameLine();
-        ImGui::PushStyleColor(ImGuiCol_Text, 0xFFFF0000);
-        ImGui::Checkbox("R", &hm->show_reads); ImGui::SameLine();
-        ImGui::PushStyleColor(ImGuiCol_Text, 0xFF00FF00);
-        ImGui::Checkbox("W", &hm->show_writes);
-        ImGui::PopStyleColor(3);
-        if (ImGui::Combo("Size", &hm->tex_width_uicombo_state,
-            "16 x 4096 bytes\0"
-            "32 x 2048 bytes\0"
-            "64 x 1024 bytes\0"
-            "128 x 512 bytes\0"
-            "256 x 256 bytes\0"
-            "512 x 128 bytes\0\0"))
-        {
-            hm->next_tex_width = 1<<(hm->tex_width_uicombo_state+4);
-        }
-        ImGui::SliderInt("Scale", &hm->scale, 1, 8);
-        ImGui::SliderInt("Auto Clear", &hm->autoclear_interval, 0, 32);
-        if (ImGui::IsItemHovered() && (hm->autoclear_interval == 0)) {
-            ImGui::SetTooltip("Slide to >0 to automatically\nclear every Nth frames.");
-        }
-        ImGui::BeginChild("##tex", ImVec2(0, 0), true, ImGuiWindowFlags_HorizontalScrollbar);
-        ImVec2 screen_pos = ImGui::GetCursorScreenPos();
-        ImVec2 mouse_pos = ImGui::GetMousePos();
-        float w = (float) (hm->scale * hm->tex_width);
-        float h = (float) (hm->scale * hm->tex_height);
-        ImGui::Image(win->heatmap.texture, ImVec2(w, h), ImVec2(0, 0), ImVec2(1, 1));
-        int x = (int)((mouse_pos.x - screen_pos.x) / hm->scale);
-        int y = (int)((mouse_pos.y - screen_pos.y) / hm->scale);
-        uint16_t addr = y * hm->tex_width + x;
-        if (hm->items[addr].op_start != 0) {
-            /* address is actually an opcode followup byte, reset to start of instruction */
-            addr = hm->items[addr].op_start;
-        }
-        if (ImGui::IsItemHovered()) {
-            if (hm->items[addr].op_count > 0) {
-                _ui_dbg_disasm(win, addr);
-                ImGui::SetTooltip("%04X: %s (ticks: %d)\n(right-click for options)",
-                    addr, win->dasm.str_buf, hm->items[addr].ticks);
-            }
-            else {
-                ImGui::SetTooltip("%04X: %02X %02X %02X %02X\n(right-click for options)", addr,
-                    _ui_dbg_read_byte(win, addr),
-                    _ui_dbg_read_byte(win, addr+1),
-                    _ui_dbg_read_byte(win, addr+2),
-                    _ui_dbg_read_byte(win, addr+3));
-            }
-        }
-        if (ImGui::BeginPopupContextItem("##popup")) {
-            if (!hm->popup_addr_valid) {
-                hm->popup_addr_valid = true;
-                hm->popup_addr = addr;
-            }
-            ImGui::Text("Address: %04X", hm->popup_addr);
-            ImGui::Separator();
-            if (ImGui::Selectable("Add Exec Breakpoint")) {
-                if (-1 == _ui_dbg_bp_find(win, UI_DBG_BREAKTYPE_EXEC, hm->popup_addr)) {
-                    _ui_dbg_bp_add_exec(win, true, hm->popup_addr);
-                }
-            }
-            if (ImGui::Selectable("Add Byte Breakpoint")) {
-                if (-1 == _ui_dbg_bp_find(win, UI_DBG_BREAKTYPE_BYTE, hm->popup_addr)) {
-                    _ui_dbg_bp_add_byte(win, false, hm->popup_addr);
-                    win->ui.show_breakpoints = true;
-                    ImGui::SetWindowFocus("Breakpoints");
-                }
-            }
-            if (ImGui::Selectable("Add Word Breakpoint")) {
-                if (-1 == _ui_dbg_bp_find(win, UI_DBG_BREAKTYPE_WORD, hm->popup_addr)) {
-                    _ui_dbg_bp_add_word(win, false, hm->popup_addr);
-                    win->ui.show_breakpoints = true;
-                    ImGui::SetWindowFocus("Breakpoints");
-                }
-            }
-            ImGui::EndPopup();
-        }
-        else {
-            hm->popup_addr_valid = false;
-        }
-        ImGui::EndChild();
-    }
-    ImGui::End();
-}
-
 /*== UI HELPERS ==============================================================*/
 static void _ui_dbg_uistate_init(ui_dbg_t* win, ui_dbg_desc_t* desc) {
     ui_dbg_uistate_t* ui = &win->ui;
@@ -1060,7 +937,6 @@ static void _ui_dbg_uistate_init(ui_dbg_t* win, ui_dbg_desc_t* desc) {
     ui->init_y = (float) desc->y;
     ui->init_w = (float) ((desc->w == 0) ? 380 : desc->w);
     ui->init_h = (float) ((desc->h == 0) ? 440 : desc->h);
-    ui->show_regs = true;
     ui->show_buttons = true;
     ui->show_bytes = true;
     ui->show_history = false;
@@ -1081,12 +957,6 @@ static void _ui_dbg_uistate_init(ui_dbg_t* win, ui_dbg_desc_t* desc) {
             case UI_DBG_BREAKTYPE_WORD:
                 bt->label = "Word at";
                 bt->show_addr = bt->show_cmp = bt->show_val16 = true;
-                break;
-            case UI_DBG_BREAKTYPE_IRQ:
-                bt->label = "IRQ";
-                break;
-            case UI_DBG_BREAKTYPE_NMI:
-                bt->label = "NMI";
                 break;
         }
         ui->breaktype_combo_labels[i] = bt->label;
@@ -1128,9 +998,6 @@ static void _ui_dbg_draw_menu(ui_dbg_t* win) {
             if (ImGui::MenuItem("Step Into", win->ui.keys.step_into.name, false, win->dbg.stopped)) {
                 _ui_dbg_step_into(win);
             }
-            if (ImGui::MenuItem("Tick", win->ui.keys.step_tick.name, false, win->dbg.stopped)) {
-                _ui_dbg_step_tick(win);
-            }
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Breakpoints")) {
@@ -1155,9 +1022,7 @@ static void _ui_dbg_draw_menu(ui_dbg_t* win) {
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Show")) {
-            ImGui::MenuItem("Memory Heatmap", 0, &win->ui.show_heatmap);
             ImGui::MenuItem("Execution History", 0, &win->ui.show_history);
-            ImGui::MenuItem("Registers", 0, &win->ui.show_regs);
             ImGui::MenuItem("Button Bar", 0, &win->ui.show_buttons);
             ImGui::MenuItem("Breakpoints", 0, &win->ui.show_breakpoints);
             ImGui::MenuItem("Opcode Bytes", 0, &win->ui.show_bytes);
@@ -1169,13 +1034,6 @@ static void _ui_dbg_draw_menu(ui_dbg_t* win) {
         ImGui::OpenPopup("Delete All?");
     }
     _ui_dbg_bp_draw_delete_all_modal(win, "Delete All?");
-}
-
-void _ui_dbg_draw_regs(ui_dbg_t* win) {
-    if (!win->ui.show_regs) {
-        return;
-    }
-    ImGui::Separator();
 }
 
 /* handle keyboard input, the debug window must be focused for hotkeys to work! */
@@ -1195,11 +1053,6 @@ static void _ui_dbg_handle_input(ui_dbg_t* win) {
         if (0 != win->ui.keys.step_into.keycode) {
             if (ImGui::IsKeyPressed((ImGuiKey)win->ui.keys.step_into.keycode)) {
                 _ui_dbg_step_into(win);
-            }
-        }
-        if (0 != win->ui.keys.step_tick.keycode) {
-            if (ImGui::IsKeyPressed((ImGuiKey)win->ui.keys.step_tick.keycode)) {
-                _ui_dbg_step_tick(win);
             }
         }
     }
@@ -1232,11 +1085,6 @@ static void _ui_dbg_draw_buttons(ui_dbg_t* win) {
         snprintf(str, sizeof(str), "Into (%s)", _ui_dbg_str_or_def(win->ui.keys.step_into.name, "-"));
         if (ImGui::Button(str)) {
             _ui_dbg_step_into(win);
-        }
-        ImGui::SameLine();
-        snprintf(str, sizeof(str), "Tick (%s)", _ui_dbg_str_or_def(win->ui.keys.step_tick.name, "-"));
-        if (ImGui::Button(str)) {
-            _ui_dbg_step_tick(win);
         }
     }
     else {
@@ -1315,6 +1163,7 @@ static bool _ui_dbg_line_array_needs_update(ui_dbg_t* win, uint16_t addr) {
 
 static void _ui_dbg_draw_main(ui_dbg_t* win) {
     const float line_height = ImGui::GetTextLineHeight();
+    ImGui::Text("Task: %u", win->dbg.game->vm.current_task);
     ImGui::SetNextWindowContentSize(ImVec2(0, UI_DBG_NUM_LINES * line_height));
     ImGui::BeginChild("##main", ImGui::GetContentRegionAvail(), false);
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0,0));
@@ -1482,7 +1331,6 @@ static void _ui_dbg_dbgwin_draw(ui_dbg_t* win) {
             _ui_dbg_handle_input(win);
         }
         _ui_dbg_draw_menu(win);
-        _ui_dbg_draw_regs(win);
         _ui_dbg_draw_buttons(win);
         _ui_dbg_draw_main(win);
     }
@@ -1533,9 +1381,6 @@ void ui_dbg_reboot(ui_dbg_t* win) {
 
 void ui_dbg_tick(ui_dbg_t* win, uint64_t pins) {
     int trap_id = 0;
-    if (win->dbg.step_mode == UI_DBG_STEPMODE_TICK) {
-        trap_id = UI_DBG_STEP_TRAPID;
-    }
     // evaluate per-op breakpoints
     if (true) {
         const uint16_t pc = pins & 0xFFFF;
@@ -1564,11 +1409,10 @@ void ui_dbg_tick(ui_dbg_t* win, uint64_t pins) {
 void ui_dbg_draw(ui_dbg_t* win) {
     GAME_ASSERT(win && win->valid && win->ui.title);
     win->dbg.frame_id++;
-    if (!(win->ui.open || win->ui.show_heatmap || win->ui.show_breakpoints || win->ui.show_history)) {
+    if (!(win->ui.open || win->ui.show_breakpoints || win->ui.show_history)) {
         return;
     }
     _ui_dbg_dbgwin_draw(win);
-    _ui_dbg_heatmap_draw(win);
     _ui_dbg_history_draw(win);
     _ui_dbg_bp_draw(win);
 }

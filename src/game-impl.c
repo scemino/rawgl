@@ -2357,87 +2357,94 @@ static void _game_vm_update_input(game_t* game) {
 }
 
 static void _game_vm_execute_task(game_t* game) {
-	while (!game->vm.paused) {
-		uint8_t opcode = _fetch_byte(&game->vm.ptr);
-		if (opcode & 0x80) {
-			const uint16_t off = ((opcode << 8) | _fetch_byte(&game->vm.ptr)) << 1;
-			game->res.use_seg_video2 = false;
-			_game_point_t pt;
-			pt.x = _fetch_byte(&game->vm.ptr);
-			pt.y = _fetch_byte(&game->vm.ptr);
-			int16_t h = pt.y - 199;
-			if (h > 0) {
-				pt.y = 199;
-				pt.x += h;
-			}
-			debug(GAME_DBG_VIDEO, "vid_opcd_0x80 : opcode=0x%X off=0x%X x=%d y=%d", opcode, off, pt.x, pt.y);
-			_game_video_set_data_buffer(game, game->res.seg_video1, off);
-			_game_video_draw_shape(game, 0xFF, 64, &pt);
-		} else if (opcode & 0x40) {
-			_game_point_t pt;
-			const uint8_t offsetHi = _fetch_byte(&game->vm.ptr);
-			const uint16_t off = ((offsetHi << 8) | _fetch_byte(&game->vm.ptr)) << 1;
-			pt.x = _fetch_byte(&game->vm.ptr);
-			game->res.use_seg_video2 = false;
-			if (!(opcode & 0x20)) {
-				if (!(opcode & 0x10)) {
-					pt.x = (pt.x << 8) | _fetch_byte(&game->vm.ptr);
-				} else {
-					pt.x = game->vm.vars[pt.x];
-				}
-			} else {
-				if (opcode & 0x10) {
-					pt.x += 0x100;
-				}
-			}
-			pt.y = _fetch_byte(&game->vm.ptr);
-			if (!(opcode & 8)) {
-				if (!(opcode & 4)) {
-					pt.y = (pt.y << 8) | _fetch_byte(&game->vm.ptr);
-				} else {
-					pt.y = game->vm.vars[pt.y];
-				}
-			}
-			uint16_t zoom = 64;
-			if (!(opcode & 2)) {
-				if (opcode & 1) {
-					zoom = game->vm.vars[_fetch_byte(&game->vm.ptr)];
-				}
-			} else {
-				if (opcode & 1) {
-					game->res.use_seg_video2 = true;
-				} else {
-					zoom = _fetch_byte(&game->vm.ptr);
-				}
-			}
-			debug(GAME_DBG_VIDEO, "vid_opcd_0x40 : off=0x%X x=%d y=%d", off, pt.x, pt.y);
-			_game_video_set_data_buffer(game, game->res.use_seg_video2 ? game->res.seg_video2 : game->res.seg_video1, off);
-			_game_video_draw_shape(game, 0xFF, zoom, &pt);
-		} else {
-			if (opcode > 0x1A) {
-				error("Script::executeTask() ec=0x%X invalid opcode=0x%X", 0xFFF, opcode);
-			} else {
-				(*_opTable[opcode])(game);
-			}
-		}
-	}
+    uint8_t opcode = _fetch_byte(&game->vm.ptr);
+    if (opcode & 0x80) {
+        const uint16_t off = ((opcode << 8) | _fetch_byte(&game->vm.ptr)) << 1;
+        game->res.use_seg_video2 = false;
+        _game_point_t pt;
+        pt.x = _fetch_byte(&game->vm.ptr);
+        pt.y = _fetch_byte(&game->vm.ptr);
+        int16_t h = pt.y - 199;
+        if (h > 0) {
+            pt.y = 199;
+            pt.x += h;
+        }
+        debug(GAME_DBG_VIDEO, "vid_opcd_0x80 : opcode=0x%X off=0x%X x=%d y=%d", opcode, off, pt.x, pt.y);
+        _game_video_set_data_buffer(game, game->res.seg_video1, off);
+        _game_video_draw_shape(game, 0xFF, 64, &pt);
+    } else if (opcode & 0x40) {
+        _game_point_t pt;
+        const uint8_t offsetHi = _fetch_byte(&game->vm.ptr);
+        const uint16_t off = ((offsetHi << 8) | _fetch_byte(&game->vm.ptr)) << 1;
+        pt.x = _fetch_byte(&game->vm.ptr);
+        game->res.use_seg_video2 = false;
+        if (!(opcode & 0x20)) {
+            if (!(opcode & 0x10)) {
+                pt.x = (pt.x << 8) | _fetch_byte(&game->vm.ptr);
+            } else {
+                pt.x = game->vm.vars[pt.x];
+            }
+        } else {
+            if (opcode & 0x10) {
+                pt.x += 0x100;
+            }
+        }
+        pt.y = _fetch_byte(&game->vm.ptr);
+        if (!(opcode & 8)) {
+            if (!(opcode & 4)) {
+                pt.y = (pt.y << 8) | _fetch_byte(&game->vm.ptr);
+            } else {
+                pt.y = game->vm.vars[pt.y];
+            }
+        }
+        uint16_t zoom = 64;
+        if (!(opcode & 2)) {
+            if (opcode & 1) {
+                zoom = game->vm.vars[_fetch_byte(&game->vm.ptr)];
+            }
+        } else {
+            if (opcode & 1) {
+                game->res.use_seg_video2 = true;
+            } else {
+                zoom = _fetch_byte(&game->vm.ptr);
+            }
+        }
+        debug(GAME_DBG_VIDEO, "vid_opcd_0x40 : off=0x%X x=%d y=%d", off, pt.x, pt.y);
+        _game_video_set_data_buffer(game, game->res.use_seg_video2 ? game->res.seg_video2 : game->res.seg_video1, off);
+        _game_video_draw_shape(game, 0xFF, zoom, &pt);
+    } else {
+        if (opcode > 0x1A) {
+            error("Script::executeTask() ec=0x%X invalid opcode=0x%X", 0xFFF, opcode);
+        } else {
+            (*_opTable[opcode])(game);
+        }
+    }
 }
 
 static void _game_vm_run(game_t* game) {
-	for (int i = 0; i < 0x40 && !game->input.quit; ++i) {
+    const int i = game->vm.current_task;
+    if(!game->input.quit) {
 		if (game->vm.states[0][i] == 0) {
 			uint16_t n = game->vm.tasks[0][i];
 			if (n != 0xFFFF) {
 				game->vm.ptr.pc = game->res.seg_code + n;
-				game->vm.stack_ptr = 0;
 				game->vm.paused = false;
 				debug(GAME_DBG_SCRIPT, "Script::runTasks() i=0x%02X n=0x%02X", i, n);
                 _game_vm_execute_task(game);
 				game->vm.tasks[0][i] = game->vm.ptr.pc - game->res.seg_code;
 				debug(GAME_DBG_SCRIPT, "Script::runTasks() i=0x%02X pos=0x%X", i, game->vm.tasks[0][i]);
+                if(!game->vm.paused) {
+                    return;
+                }
 			}
 		}
 	}
+
+   // go to next active thread
+   do {
+        game->vm.current_task = (game->vm.current_task + 1) % 0x40;
+    } while (game->vm.current_task !=0 && game->vm.tasks[0][game->vm.current_task] == 0xFFFF);
+    game->vm.stack_ptr = 0;
 }
 
 // Game
@@ -2527,44 +2534,47 @@ void game_start(game_t* game, game_data_t data) {
     game->title = _game_res_get_game_title(game);
 }
 
-void _game_exec(game_t* game, uint32_t ms) {
-    (void)game;
-    game->elapsed += ms;
-    if(game->sleep) {
-        if(ms > game->sleep) {
-            game->sleep = 0;
-        } else {
-            game->sleep -= ms;
-        }
-        return;
-    }
-
-    _game_vm_setup_tasks(game);
-    _game_vm_update_input(game);
-    _game_vm_run(game);
-    const int num_frames = saudio_expect();
-    if (num_frames > 0) {
-        const int num_samples = num_frames * saudio_channels();
-        _game_audio_update(game, num_samples);
-    }
-
-    game->sleep += 16;
-}
-
 void game_exec(game_t* game, uint32_t ms) {
     GAME_ASSERT(game && game->valid);
+    game->elapsed += ms;
 
-    if (0 == game->debug.callback.func) {
-        // run without debug hook
-        _game_exec(game, ms);
-    } else {
-        // run with debug hook
-        if(!(*game->debug.stopped)) {
-            _game_exec(game, ms);
-            game->debug.callback.func(game->debug.callback.user_data, game->vm.ptr.pc - game->res.seg_code);
+    if(game->vm.current_task == 0) {
+        if(game->sleep) {
+            if(ms > game->sleep) {
+                game->sleep = 0;
+            } else {
+                game->sleep -= ms;
+            }
+            return;
         }
+        _game_vm_setup_tasks(game);
+        _game_vm_update_input(game);
+    }
+
+    do {
+        if (0 == game->debug.callback.func) {
+            // run without debug hook
+            _game_vm_run(game);
+        } else {
+            // run with debug hook
+            if(!*game->debug.stopped) {
+                _game_vm_run(game);
+                game->debug.callback.func(game->debug.callback.user_data, game->vm.ptr.pc - game->res.seg_code);
+            }
+        }
+    } while(!*game->debug.stopped && (!game->vm.paused || game->vm.current_task != 0));
+
+    if(game->vm.current_task == 0) {
+        const int num_frames = saudio_expect();
+        if (num_frames > 0) {
+            const int num_samples = num_frames * saudio_channels();
+            _game_audio_update(game, num_samples);
+        }
+
+        game->sleep += 16;
     }
 }
+
 
 void game_cleanup(game_t* game) {
     GAME_ASSERT(game && game->valid);

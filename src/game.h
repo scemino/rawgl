@@ -170,7 +170,7 @@ typedef struct {
     int                 part_num;               // indicates the part number where the fame starts
     bool                use_ega;                // true to use EGA palette, false to use VGA palette
     game_lang_t         lang;                   // language to use
-    uint8_t*      demo3_joy;              // contains content of demo3.joy file if present
+    uint8_t*            demo3_joy;              // contains content of demo3.joy file if present
     size_t              demo3_joy_size;
     game_audio_desc_t   audio;
     game_debug_t        debug;
@@ -192,7 +192,6 @@ typedef struct {
 	uint32_t    unpacked_size;  // 0x12
 } game_mem_entry_t;
 
-// TODO: rename this
 typedef struct {
 	uint8_t *pc;
 } game_pc_t;
@@ -271,6 +270,7 @@ typedef struct {
         bool        fast_mode;
         int         screen_num;
         uint32_t    start_time, time_stamp;
+        int         current_task;
     } vm;
 
     struct {
