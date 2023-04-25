@@ -82,6 +82,7 @@ typedef struct {
     ui_game_vm_t vm;
     ui_dbg_t dbg;
     ui_snapshot_t snapshot;
+    ui_dasm_t dasm[4];
 } ui_game_t;
 
 void ui_game_init(ui_game_t* ui, const ui_game_desc_t* desc);
@@ -125,6 +126,13 @@ static void _ui_game_draw_menu(ui_game_t* ui) {
             ImGui::MenuItem("CPU Debugger", 0, &ui->dbg.ui.open);
             ImGui::MenuItem("Breakpoints", 0, &ui->dbg.ui.show_breakpoints);
             ImGui::MenuItem("Execution History", 0, &ui->dbg.ui.show_history);
+            if (ImGui::BeginMenu("Disassembler")) {
+                ImGui::MenuItem("Window #1", 0, &ui->dasm[0].open);
+                ImGui::MenuItem("Window #2", 0, &ui->dasm[1].open);
+                ImGui::MenuItem("Window #3", 0, &ui->dasm[2].open);
+                ImGui::MenuItem("Window #4", 0, &ui->dasm[3].open);
+                ImGui::EndMenu();
+            }
             ImGui::EndMenu();
         }
         ui_util_options_menu();
@@ -386,7 +394,7 @@ static void _ui_game_draw_resources(ui_game_t* ui) {
                 ImGui::TableNextColumn();
                 static const char* labels[]  = {"Sound", "Music", "Bitmap", "Palette", "Byte code", "Shape", "Bank"};
                 ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 0));
-                ImGui::ColorButton("##color", ImColor::HSV(e->type / 7.0f, 0.6f, 0.6f), ImGuiColorEditFlags_NoTooltip); ImGui::SameLine(); ImGui::Text(labels[e->type]);
+                ImGui::ColorButton("##color", ImColor::HSV(e->type / 7.0f, 0.6f, 0.6f), ImGuiColorEditFlags_NoTooltip); ImGui::SameLine(); ImGui::Text("%s", labels[e->type]);
                 ImGui::PopStyleVar();
 
                 ImGui::TableNextColumn();
@@ -463,6 +471,19 @@ void ui_game_init(ui_game_t* ui, const ui_game_desc_t* ui_desc) {
         desc.user_data = ui->game;
         ui_dbg_init(&ui->dbg, &desc);
     }
+    int x = 20, y = 20, dx = 10, dy = 10;
+    {
+        ui_dasm_desc_t desc = {0};
+        desc.layers[0] = "System";
+        desc.read_cb = _ui_raw_mem_read;
+        desc.user_data = ui->game;
+        static const char* titles[4] = { "Disassembler #1", "Disassembler #2", "Disassembler #2", "Dissassembler #3" };
+        for (int i = 0; i < 4; i++) {
+            desc.title = titles[i]; desc.x = x; desc.y = y;
+            ui_dasm_init(&ui->dasm[i], &desc);
+            x += dx; y += dy;
+        }
+    }
     {
         ui->video.texture_cbs = ui_desc->dbg_texture;
         ui->video.x = 10;
@@ -494,6 +515,9 @@ void ui_game_discard(ui_game_t* ui) {
     for(int i=0; i<4; i++) {
         ui->video.texture_cbs.destroy_cb(ui->video.tex_fb[i]);
     }
+    for (int i = 0; i < 4; i++) {
+        ui_dasm_discard(&ui->dasm[i]);
+    }
     ui_dbg_discard(&ui->dbg);
     ui->game = 0;
 }
@@ -504,6 +528,9 @@ void ui_game_draw(ui_game_t* ui) {
     _ui_game_draw_resources(ui);
     _ui_game_draw_video(ui);
     _ui_game_draw_vm(ui);
+    for (int i = 0; i < 4; i++) {
+        ui_dasm_draw(&ui->dasm[i]);
+    }
     ui_dbg_draw(&ui->dbg);
 }
 
