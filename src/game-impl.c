@@ -1059,11 +1059,18 @@ static void _game_audio_sfx_play(game_t* game, int rate) {
 	player->playing = true;
 	player->rate = rate;
 	player->samples_left = 0;
-	memset(player->channels, 0, sizeof(player->channels));
+	memset(player->channels, 0, GAME_SFX_NUM_CHANNELS*sizeof(game_audio_sfx_channel_t));
 }
 
 static int16_t _to_i16(int a) {
-	return ((a << 8) | a) - 32768;
+	if (a <= -128) {
+		return -32768;
+	} else if (a >= 127) {
+		return 32767;
+	} else {
+		const uint8_t u8 = (a ^ 0x80);
+		return ((u8 << 8) | u8) - 32768;
+	}
 }
 
 static void _game_audio_sfx_mix_channel(int16_t* s, game_audio_sfx_channel_t* ch) {
@@ -1804,6 +1811,7 @@ static void _game_play_sfx_music(game_t* game) {
 }
 
 static void _game_audio_stop_sfx_music(game_t* game) {
+    debug(GAME_DBG_SND, "SfxPlayer::stop()");
     game->audio.sfx_player.playing = false;
 }
 
@@ -1826,6 +1834,10 @@ static int16_t mix_i16(int sample1, int sample2) {
 	return sample < -32768 ? -32768 : ((sample > 32767 ? 32767 : sample));
 }
 
+static int16_t _to_raw_i16(int a) {
+	return ((a << 8) | a) - 32768;
+}
+
 void _game_audio_mix_raw(game_audio_channel_t* chan, int16_t* sample) {
     if (chan->data) {
         uint32_t pos = _frac_get_int(&chan->pos);
@@ -1841,9 +1853,7 @@ void _game_audio_mix_raw(game_audio_channel_t* chan, int16_t* sample) {
                 return;
             }
         }
-        *sample = mix_i16(*sample, _to_i16(chan->data[pos] ^ 0x80) * chan->volume / 64);
-    } else {
-        *sample = 0;
+        *sample = mix_i16(*sample, _to_raw_i16(chan->data[pos] ^ 0x80) * chan->volume / 64);
     }
 }
 
@@ -3061,21 +3071,18 @@ void game_exec(game_t* game, uint32_t ms) {
         }
     } while(!*game->debug.stopped && (!game->vm.paused || game->vm.current_task != 0));
 
-    if(game->vm.current_task == 0) {
-        const int num_frames = saudio_expect();
-        if (num_frames > 0) {
-            const int num_samples = num_frames * saudio_channels();
-            _game_audio_update(game, num_samples);
-        }
-
-        game->sleep += 16;
+    const int num_frames = saudio_expect();
+    if (num_frames > 0) {
+        const int num_samples = num_frames * saudio_channels();
+        _game_audio_update(game, num_samples);
     }
+
+    game->sleep += 20; // wait 20 ms (50 Hz)
 }
 
 
 void game_cleanup(game_t* game) {
     GAME_ASSERT(game && game->valid);
-    (void)game;
     _game_audio_stop_all(game);
 }
 
