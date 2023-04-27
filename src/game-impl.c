@@ -2088,7 +2088,7 @@ static bool _game_res_read_bank(game_t* game, const game_mem_entry_t *me, uint8_
     if(me->bank_num > 0xd || game->res.data.banks[me->bank_num-1].size == 0)
         return false;
 
-    memcpy(dstBuf, game->res.data.banks[me->bank_num-1].ptr + me->bank_pos, me->packed_size);
+    memcpy(dstBuf, (uint8_t*)game->res.data.banks[me->bank_num-1].ptr + me->bank_pos, me->packed_size);
     if (me->packed_size != me->unpacked_size) {
         return _bytekiller_unpack(dstBuf, me->unpacked_size, dstBuf, me->packed_size);
     }

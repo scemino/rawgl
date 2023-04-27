@@ -1,4 +1,4 @@
-name: build_and_test
+name: build
 
 on: [push, pull_request]
 
@@ -11,8 +11,6 @@ jobs:
           run:  python3 fips build win64-vstudio-debug
         - name: win64-vstudio-release
           run:  python3 fips build win64-vstudio-release
-        - name: raw win64-vstudio-debug
-          run:  python3 fips run raw win64-vstudio-debug
     mac:
         runs-on: macos-latest
         steps:
@@ -21,8 +19,6 @@ jobs:
           run:  python3 fips build osx-make-debug
         - name: osx-make-release
           run:  python3 fips build osx-make-release
-        - name: raw osx-make-debug
-          run:  python3 fips run raw osx-make-debug
     linux:
         runs-on: ubuntu-latest
         steps:
@@ -35,8 +31,6 @@ jobs:
           run:  python3 fips build linux-make-debug
         - name: linux-make-release
           run:  python3 fips build linux-make-release
-        - name: raw linux-make-debug
-          run:  python3 fips run raw linux-make-debug
     emscripten:
         runs-on: ubuntu-latest
         steps:

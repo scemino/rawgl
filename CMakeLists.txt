@@ -2,6 +2,8 @@
 # project: raw
 #
 cmake_minimum_required(VERSION 3.21)
+set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_C_STANDARD 11)
 project(raw)
 # include the fips main cmake file
 get_filename_component(FIPS_ROOT_DIR "../fips" ABSOLUTE)
