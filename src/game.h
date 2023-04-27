@@ -58,10 +58,7 @@ extern "C" {
 
 typedef enum  {
 	GAME_LANG_FR,
-	GAME_LANG_US,
-	GAME_LANG_DE,
-	GAME_LANG_ES,
-	GAME_LANG_IT
+	GAME_LANG_US
 } game_lang_t;
 
 typedef enum  {
@@ -161,8 +158,8 @@ typedef struct {
 } game_audio_desc_t;
 
 typedef struct {
-    uint8_t*  mem_list;
-    uint8_t*  banks[0xd];
+    gfx_range_t  mem_list;
+    gfx_range_t  banks[0xd];
 } game_data_t;
 
 // configuration parameters for game_init()
@@ -304,13 +301,9 @@ void game_char_pressed(game_t* game, int c);
 bool game_get_res_buf(game_t* game, int id, uint8_t* dst);
 void game_start(game_t* game, game_data_t data);
 
-// prepare chips_audio_t snapshot for saving
 void game_audio_callback_snapshot_onsave(game_audio_callback_t* snapshot);
-// fixup chips_audio_t snapshot after loading
 void game_audio_callback_snapshot_onload(game_audio_callback_t* snapshot, game_audio_callback_t* sys);
-// prepare chips_debut_t snapshot for saving
 void game_debug_snapshot_onsave(game_debug_t* snapshot);
-// fixup chips_debug_t snapshot after loading
 void game_debug_snapshot_onload(game_debug_t* snapshot, game_debug_t* sys);
 bool game_load_snapshot(game_t* game, uint32_t version, game_t* src);
 uint32_t game_save_snapshot(game_t* game, game_t* dst);

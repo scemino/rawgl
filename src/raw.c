@@ -42,7 +42,7 @@ static struct {
         ui_game_t   ui;
         game_snapshot_t snapshots[UI_SNAPSHOT_MAX_SLOTS];
     #endif
-} state;
+} state = {0};
 
 #ifdef GAME_USE_UI
 static void ui_draw_cb(void);
@@ -87,7 +87,7 @@ static void ui_save_snapshot(size_t slot) {
 #endif
 
 static int _to_num(char c) {
-    if(c > '0' && c < '9') {
+    if(c > '0' && c <= '9') {
         return c - '0';
     } else if(c > 'a') {
         return 10 + c - 'a';
@@ -183,13 +183,15 @@ bool _game_load_data(gfx_range_t data) {
             result = true;
             void* ptr = malloc(stat.m_uncomp_size);
             mz_zip_reader_extract_to_mem(&archive, i, ptr, stat.m_uncomp_size, 0);
-            state.data.mem_list = ptr;
+            state.data.mem_list.size = stat.m_uncomp_size;
+            state.data.mem_list.ptr = ptr;
         } else if(strncmp(stat.m_filename, "bank", 4) == 0) {
             result = true;
             int bank_n = _to_num(stat.m_filename[5]);
             void* ptr = malloc(stat.m_uncomp_size);
             mz_zip_reader_extract_to_mem(&archive, i, ptr, stat.m_uncomp_size, 0);
-            state.data.banks[bank_n - 1] = ptr;
+            state.data.banks[bank_n - 1].ptr = ptr;
+            state.data.banks[bank_n - 1].size = stat.m_uncomp_size;
         }
     }
     mz_zip_reader_end(&archive);
