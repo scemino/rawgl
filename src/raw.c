@@ -14,11 +14,10 @@
 #include "sokol_log.h"
 #include "clock.h"
 #include "gfx.h"
-#include "fs.h"
-#include "common.h"
+#define GAME_IMPL
 #include "game.h"
-#include "raw-data.h"
 #include "miniz.h"
+#include "fs.h"
 #if defined(GAME_USE_UI)
     #include "ui.h"
     #include "ui/raw-dasm.h"

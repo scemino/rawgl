@@ -5,7 +5,6 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include "gfx.h"
-#include "common.h"
 #include "game.h"
 #define GAME_UI_IMPL
 #include "imgui.h"
