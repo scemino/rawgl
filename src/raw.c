@@ -32,9 +32,17 @@ typedef struct {
     game_t      game;
 } game_snapshot_t;
 
+typedef struct {
+    int             part_num;
+    bool            use_ega;
+    game_lang_t     lang;
+    bool            enable_protection;
+} game_options_t;
+
 static struct {
     bool            ready;
     game_data_t     data;
+    game_options_t  options;
     game_t          game;
     uint32_t        frame_time_us;
     #ifdef GAME_USE_UI
@@ -107,11 +115,18 @@ static void app_init(void) {
     if (sargs_exists("lang")) {
         lang = strcmp(sargs_value("lang"), "fr") == 0 ? GAME_LANG_FR : GAME_LANG_US;
     }
-    game_init(&state.game, &(game_desc_t){
+    state.options = (game_options_t){
         .part_num = part,
+        .lang = lang,
         .use_ega = sargs_exists("use_ega"),
         .enable_protection = sargs_exists("protec"),
-        .lang = lang,
+    };
+    
+    game_init(&state.game, &(game_desc_t){
+        .part_num = state.options.part_num,
+        .use_ega = state.options.use_ega,
+        .enable_protection = state.options.enable_protection,
+        .lang = state.options.lang,
         .audio = {
             .callback = { .func = push_audio },
             .sample_rate = saudio_sample_rate()
@@ -162,11 +177,25 @@ static void app_init(void) {
 }
 
 static void _game_start(void) {
+    game_init(&state.game, &(game_desc_t){
+        .part_num = state.options.part_num,
+        .use_ega = state.options.use_ega,
+        .enable_protection = state.options.enable_protection,
+        .lang = state.options.lang,
+        .audio = {
+            .callback = { .func = push_audio },
+            .sample_rate = saudio_sample_rate()
+        },
+         #if defined(GAME_USE_UI)
+            .debug = ui_game_get_debug(&state.ui)
+        #endif
+    });
     game_start(&state.game, state.data);
     sapp_set_window_title(state.game.title);
 }
 
 bool _game_load_data(gfx_range_t data) {
+    memset(&state.data, 0, sizeof(state.data));
     mz_zip_archive archive;
     mz_zip_zero_struct(&archive);
     mz_zip_reader_init_mem(&archive, data.ptr, data.size, 0);

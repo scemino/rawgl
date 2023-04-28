@@ -2905,11 +2905,6 @@ static void _inp_handleSpecialKeys(game_t* game) {
 	if (game->input.pause) {
 		if (game->res.current_part != GAME_PART_COPY_PROTECTION && game->res.current_part != GAME_PART_INTRO) {
 			game->input.pause = false;
-            // TODO:
-			//while (!game->input.pause && !game->input.quit) {
-            //_state->_sys.processEvents();
-            //_state->_sys.sleep(50);
-			//}
 		}
 		game->input.pause = false;
 	}
@@ -3421,6 +3416,7 @@ void game_exec(game_t* game, uint32_t ms) {
         _game_vm_update_input(game);
     }
 
+    bool stopped = false;
     do {
         if (0 == game->debug.callback.func) {
             // run without debug hook
@@ -3430,9 +3426,10 @@ void game_exec(game_t* game, uint32_t ms) {
             if(!*game->debug.stopped) {
                 _game_vm_run(game);
                 game->debug.callback.func(game->debug.callback.user_data, game->vm.ptr.pc - game->res.seg_code);
+                stopped = *game->debug.stopped;
             }
         }
-    } while(!*game->debug.stopped && (!game->vm.paused || game->vm.current_task != 0));
+    } while(!stopped && (!game->vm.paused || game->vm.current_task != 0));
 
     const int num_frames = saudio_expect();
     if (num_frames > 0) {
