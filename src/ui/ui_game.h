@@ -377,7 +377,7 @@ static void _ui_game_draw_resources(ui_game_t* ui) {
             ImGui::TableSetupColumn("Size");
             ImGui::TableHeadersRow();
 
-            for(int i=0; i<GAME_ENTRIES_COUNT_20TH; i++) {
+            for(int i=0; i<ui->game->res.num_mem_list; i++) {
                 game_mem_entry_t* e = &ui->game->res.mem_list[i];
                 if(e->status == 0xFF) break;
 
