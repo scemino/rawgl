@@ -20,10 +20,11 @@ Drag'n'drop a zip containing the data files.
 
 ```text
   Usage: raw [OPTIONS]...
-    file=PATH   Path to a zip file
-    lang=LANG   Language (fr,us)
-    part=NUM    Game part to start from (0-35 or 16001-16009)
-    use_ega     Use EGA palette with DOS version
+    file=PATH       Path to a zip file
+    lang=LANG       Language (fr,us)
+    part=NUM        Game part to start from (0-35 or 16001-16009)
+    use_ega=true    Use EGA palette with DOS version
+    protec=true     Enable game protection
 ```
 
 In game hotkeys :

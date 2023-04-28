@@ -227,6 +227,7 @@ typedef struct {
     int                 part_num;               // indicates the part number where the fame starts
     bool                use_ega;                // true to use EGA palette, false to use VGA palette
     game_lang_t         lang;                   // language to use
+    bool                enable_protection;
     uint8_t*            demo3_joy;              // contains content of demo3.joy file if present
     size_t              demo3_joy_size;
     game_audio_desc_t   audio;
@@ -285,6 +286,7 @@ typedef struct {
 
 typedef struct {
     bool                    valid;
+    bool                    enable_protection;
     game_debug_t            debug;
     game_res_t              res;
     const game_str_entry_t* strings_table;
@@ -2303,7 +2305,7 @@ static void _game_res_read_entries(game_t* game) {
                 me->packed_size = read_uint32_be(&p);
                 me->unpacked_size = read_uint32_be(&p);
                 if (me->status == 0xFF) {
-                    game->res.has_password_screen = false; // dump_BANK09 != NULL;
+                    game->res.has_password_screen = game->res.data.banks[8].size != 0;
                     return;
                 }
                 ++game->res.num_mem_list;
@@ -2790,26 +2792,26 @@ static void _op_cond_jmp(game_t* game) {
 	switch (op & 7) {
 	case 0:
 		expr = (b == a);
-#ifdef BYPASS_PROTECTION
-		if (game->res.current_part == GAME_PART_COPY_PROTECTION) {
-			//
-			// 0CB8: jmpIf(VAR(0x29) == VAR(0x1E), @0CD3)
-			// ...
-			//
-			if (var == 0x29 && (op & 0x80) != 0) {
-				// 4 symbols
-				game->vm.vars[0x29] = game->vm.vars[0x1E];
-				game->vm.vars[0x2A] = game->vm.vars[0x1F];
-				game->vm.vars[0x2B] = game->vm.vars[0x20];
-				game->vm.vars[0x2C] = game->vm.vars[0x21];
-				// counters
-				game->vm.vars[0x32] = 6;
-				game->vm.vars[0x64] = 20;
-				warning("Script::op_condJmp() bypassing protection");
-				expr = true;
-			}
-		}
-#endif
+        if(!game->enable_protection) {
+            if (game->res.current_part == GAME_PART_COPY_PROTECTION) {
+                //
+                // 0CB8: jmpIf(VAR(0x29) == VAR(0x1E), @0CD3)
+                // ...
+                //
+                if (var == 0x29 && (op & 0x80) != 0) {
+                    // 4 symbols
+                    game->vm.vars[0x29] = game->vm.vars[0x1E];
+                    game->vm.vars[0x2A] = game->vm.vars[0x1F];
+                    game->vm.vars[0x2B] = game->vm.vars[0x20];
+                    game->vm.vars[0x2C] = game->vm.vars[0x21];
+                    // counters
+                    game->vm.vars[0x32] = 6;
+                    game->vm.vars[0x64] = 20;
+                    warning("Script::op_condJmp() bypassing protection");
+                    expr = true;
+                }
+            }
+        }
 		break;
 	case 1:
 		expr = (b != a);
@@ -2929,12 +2931,12 @@ static void _op_updateDisplay(game_t* game) {
 	debug(GAME_DBG_SCRIPT, "Script::op_updateDisplay(%d)", page);
 	_inp_handleSpecialKeys(game);
 
-#ifndef BYPASS_PROTECTION
-	// entered protection symbols match the expected values
-	if (game->res.current_part == kPartCopyProtection && game->vm.vars[0x67] == 1) {
-		game->vm.vars[0xDC] = 33;
-	}
-#endif
+    if(game->enable_protection) {
+        // entered protection symbols match the expected values
+        if (game->res.current_part == GAME_PART_COPY_PROTECTION && game->vm.vars[0x67] == 1) {
+            game->vm.vars[0xDC] = 33;
+        }
+    }
 
 	const int frameHz = 50;
 	if (!game->vm.fast_mode && game->vm.vars[GAME_VAR_PAUSE_SLICES] != 0) {
@@ -3320,6 +3322,7 @@ void game_init(game_t* game, const game_desc_t* desc) {
     if (desc->debug.callback.func) { GAME_ASSERT(desc->debug.stopped); }
     memset(game, 0, sizeof(game_t));
     game->valid = true;
+    game->enable_protection = desc->enable_protection;
     game->debug = desc->debug;
     game->part_num = desc->part_num;
     game->res.lang = desc->lang;
@@ -3346,14 +3349,15 @@ void game_start(game_t* game, game_data_t data) {
     _game_gfx_set_work_page_ptr(game, 2);
 
     game->vm.vars[GAME_VAR_RANDOM_SEED] = time(0);
-#ifdef BYPASS_PROTECTION
-    // these 3 variables are set by the game code
-    game->vm.vars[0xBC] = 0x10;
-    game->vm.vars[0xC6] = 0x80;
-    game->vm.vars[0xF2] = (game->res.data_type == DT_AMIGA || game->res.data_type == DT_ATARI) ? 6000 : 4000;
-    // these 2 variables are set by the engine executable
-    game->vm.vars[0xDC] = 33;
-#endif
+    if(!game->enable_protection) {
+        // these 3 variables are set by the game code
+        game->vm.vars[0xBC] = 0x10;
+        game->vm.vars[0xC6] = 0x80;
+        game->vm.vars[0xF2] = (game->res.data_type == DT_AMIGA || game->res.data_type == DT_ATARI) ? 6000 : 4000;
+        // these 2 variables are set by the engine executable
+        game->vm.vars[0xDC] = 33;
+    }
+
     if (game->res.data_type == DT_DOS) {
         game->vm.vars[0xE4] = 20;
     }
@@ -3375,23 +3379,22 @@ void game_start(game_t* game, game_data_t data) {
         break;
     }
 
-    // bypass protection ?
-#ifndef BYPASS_PROTECTION
+    if(game->enable_protection) {
         switch (game->res.data_type) {
-        case Resource::DT_DOS:
-            if (!game->res._hasPasswordScreen) {
+        case DT_DOS:
+            if (!game->res.has_password_screen) {
                 break;
             }
             /* fall-through */
-        case Resource::DT_AMIGA:
-        case Resource::DT_ATARI:
-        case Resource::DT_WIN31:
-            game->part_num = kPartCopyProtection;
+        case DT_AMIGA:
+        case DT_ATARI:
+            game->part_num = GAME_PART_COPY_PROTECTION;
             break;
         default:
             break;
         }
-#endif
+    }
+
     const int num = game->part_num;
     if (num < 36) {
         _game_vm_restart_at(game, _restartPos[num * 2], _restartPos[num * 2 + 1]);

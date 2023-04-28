@@ -1,11 +1,9 @@
 fips_begin_app(raw windowed)
-    add_definitions(-DBYPASS_PROTECTION)
     fips_files(raw.c game.h)
     fips_deps(sokol miniz)
 fips_end_app()
 
 fips_begin_app(raw-ui windowed)
-    add_definitions(-DBYPASS_PROTECTION)
     fips_files(raw.c game.h raw-ui-impl.cc)
     fips_deps(sokol miniz)
     fips_deps(ui)

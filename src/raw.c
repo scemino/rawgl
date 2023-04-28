@@ -107,13 +107,10 @@ static void app_init(void) {
     if (sargs_exists("lang")) {
         lang = strcmp(sargs_value("lang"), "fr") == 0 ? GAME_LANG_FR : GAME_LANG_US;
     }
-    bool use_ega = sargs_exists("use_ega");
     game_init(&state.game, &(game_desc_t){
         .part_num = part,
-        .use_ega = use_ega,
-// TODO:
-//        .demo3_joy = dump_DEMO3_JOY,
-//        .demo3_joy_size = sizeof(dump_DEMO3_JOY),
+        .use_ega = sargs_exists("use_ega"),
+        .enable_protection = sargs_exists("protec"),
         .lang = lang,
         .audio = {
             .callback = { .func = push_audio },
