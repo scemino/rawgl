@@ -3285,7 +3285,7 @@ static void _game_vm_execute_task(game_t* game) {
     }
 }
 
-static void _game_vm_run(game_t* game) {
+static bool _game_vm_run(game_t* game) {
     const int i = game->vm.current_task;
     if(!game->input.quit) {
 		if (game->vm.states[0][i] == 0) {
@@ -3298,7 +3298,7 @@ static void _game_vm_run(game_t* game) {
 				game->vm.tasks[0][i] = game->vm.ptr.pc - game->res.seg_code;
 				debug(GAME_DBG_SCRIPT, "Script::runTasks() i=0x%02X pos=0x%X", i, game->vm.tasks[0][i]);
                 if(!game->vm.paused) {
-                    return;
+                    return false;
                 }
 			}
 		}
@@ -3309,6 +3309,8 @@ static void _game_vm_run(game_t* game) {
         game->vm.current_task = (game->vm.current_task + 1) % 0x40;
     } while (game->vm.current_task !=0 && game->vm.tasks[0][game->vm.current_task] == 0xFFFF);
     game->vm.stack_ptr = 0;
+
+    return game->vm.current_task == 0;
 }
 
 // Game
@@ -3420,16 +3422,18 @@ void game_exec(game_t* game, uint32_t ms) {
     do {
         if (0 == game->debug.callback.func) {
             // run without debug hook
-            _game_vm_run(game);
+            stopped = _game_vm_run(game);
         } else {
             // run with debug hook
-            if(!*game->debug.stopped) {
-                _game_vm_run(game);
+            stopped = *game->debug.stopped;
+            if(!stopped) {
+                stopped |= _game_vm_run(game);
                 game->debug.callback.func(game->debug.callback.user_data, game->vm.ptr.pc - game->res.seg_code);
-                stopped = *game->debug.stopped;
+            } else {
+                game->sleep = 0;
             }
         }
-    } while(!stopped && (!game->vm.paused || game->vm.current_task != 0));
+    } while(!stopped);
 
     const int num_frames = saudio_expect();
     if (num_frames > 0) {
