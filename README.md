@@ -33,8 +33,11 @@ In game hotkeys :
   Arrow Keys      move Lester
   Enter/Space     run/shoot
   C               enter a code to start at a specific position
-  P               pause the game
 ```
+
+## Try it
+
+You can play it online [here](https://scemino.github.io/raw_wp/)
 
 ## Features
 
@@ -42,6 +45,11 @@ In game hotkeys :
 - resources viewer (WIP)
 - video window: with current palette and 4 framebuffers updated in realtime
 - CPU debugger
+
+## Credits
+
+- **Gregory Montoir** for his awesome project [rawgl](https://github.com/cyxx/rawgl)
+- **flooh** for his library [sokol](https://github.com/floooh/sokol)
 
 ## Technical Details
 
