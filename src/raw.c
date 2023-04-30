@@ -96,9 +96,9 @@ static void ui_save_snapshot(size_t slot) {
 static int _to_num(char c) {
     if(c > '0' && c <= '9') {
         return c - '0';
-    } else if(c > 'a') {
+    } else if(c >= 'a') {
         return 10 + c - 'a';
-    } else if(c > 'A') {
+    } else if(c >= 'A') {
         return 10 + c - 'A';
     }
     return 0;
@@ -121,7 +121,7 @@ static void app_init(void) {
         .use_ega = sargs_exists("use_ega"),
         .enable_protection = sargs_exists("protec"),
     };
-    
+
     game_init(&state.game, &(game_desc_t){
         .part_num = state.options.part_num,
         .use_ega = state.options.use_ega,
@@ -129,9 +129,8 @@ static void app_init(void) {
         .lang = state.options.lang,
         .audio = {
             .callback = { .func = push_audio },
-            .sample_rate = saudio_sample_rate()
         },
-         #if defined(GAME_USE_UI)
+        #if defined(GAME_USE_UI)
             .debug = ui_game_get_debug(&state.ui)
         #endif
     });
@@ -184,7 +183,6 @@ static void _game_start(void) {
         .lang = state.options.lang,
         .audio = {
             .callback = { .func = push_audio },
-            .sample_rate = saudio_sample_rate()
         },
          #if defined(GAME_USE_UI)
             .debug = ui_game_get_debug(&state.ui)
