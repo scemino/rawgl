@@ -219,15 +219,17 @@ bool _game_load_data(gfx_range_t data) {
             result = true;
             void* ptr = malloc(stat.m_uncomp_size);
             mz_zip_reader_extract_to_mem(&archive, i, ptr, stat.m_uncomp_size, 0);
-            state.data.mem_list.size = stat.m_uncomp_size;
-            state.data.mem_list.ptr = ptr;
+            state.data.mem_list = (gfx_range_t){.ptr = ptr, .size = stat.m_uncomp_size};
         } else if(_game_strnicmp(stat.m_filename, "bank", 4) == 0) {
             result = true;
             int bank_n = _to_num(stat.m_filename[5]);
             void* ptr = malloc(stat.m_uncomp_size);
             mz_zip_reader_extract_to_mem(&archive, i, ptr, stat.m_uncomp_size, 0);
-            state.data.banks[bank_n - 1].ptr = ptr;
-            state.data.banks[bank_n - 1].size = stat.m_uncomp_size;
+            state.data.banks[bank_n - 1] = (gfx_range_t){.ptr = ptr, .size = stat.m_uncomp_size};
+        } else if(_game_strnicmp(stat.m_filename, "demo3.joy", 9) == 0) {
+            void* ptr = malloc(stat.m_uncomp_size);
+            mz_zip_reader_extract_to_mem(&archive, i, ptr, stat.m_uncomp_size, 0);
+            state.data.demo3_joy = (gfx_range_t){.ptr = ptr, .size = stat.m_uncomp_size};
         }
     }
     mz_zip_reader_end(&archive);

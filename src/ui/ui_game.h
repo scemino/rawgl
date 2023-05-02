@@ -212,7 +212,7 @@ static void _ui_game_draw_vm(ui_game_t* ui) {
                 ImGui::TableHeadersRow();
 
                 for(int i=0; i<64; i++) {
-                    uint16_t offset = ui->game->vm.tasks[0][i];
+                    uint16_t offset = ui->game->vm.tasks[i].pc;
 
                     if(offset == 0xffff) continue;
 

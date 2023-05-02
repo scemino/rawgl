@@ -104,7 +104,7 @@ extern "C" {
 
 #define GAME_QUAD_STRIP_MAX_VERTICES    (70)
 
-// bump when nes_t memory layout changes
+// bump when game_t memory layout changes
 #define GAME_SNAPSHOT_VERSION           (0x0001)
 
 typedef enum  {
@@ -136,8 +136,7 @@ typedef enum {
 typedef enum {
     DT_DOS,
     DT_AMIGA,
-    DT_ATARI,
-    DT_ATARI_DEMO, // ST Action Issue44 Disk28
+    DT_ATARI
 } game_data_type_t;
 
 typedef enum {
@@ -211,6 +210,7 @@ typedef struct {
 typedef struct {
     gfx_range_t  mem_list;
     gfx_range_t  banks[0xd];
+    gfx_range_t  demo3_joy;   // contains content of demo3.joy file if present
 } game_data_t;
 
 typedef void (*game_debug_func_t)(void* user_data, uint64_t pins);
@@ -228,8 +228,6 @@ typedef struct {
     bool                use_ega;                // true to use EGA palette, false to use VGA palette
     game_lang_t         lang;                   // language to use
     bool                enable_protection;
-    uint8_t*            demo3_joy;              // contains content of demo3.joy file if present
-    size_t              demo3_joy_size;
     game_audio_desc_t   audio;
     game_debug_t        debug;
     game_data_t         data;
@@ -240,8 +238,8 @@ typedef struct {
 } game_framebuffer_t;
 
 typedef struct {
-	uint8_t     status;        // 0x0
-	uint8_t     type;          // 0x1, Resource::ResType
+	uint8_t     status;         // 0x0
+	uint8_t     type;           // 0x1, Resource::ResType
 	uint8_t*    buf_ptr;        // 0x2
 	uint8_t     rank_num;       // 0x6
 	uint8_t     bank_num;       // 0x7
@@ -321,15 +319,18 @@ typedef struct {
     struct {
         int16_t     vars[256];
         uint16_t    stack_calls[64];
-        uint16_t    tasks[2][64];
-        uint8_t     states[2][64];
+        struct {
+            uint16_t pc;
+            uint16_t next_pc;
+            uint8_t  state;
+            uint8_t  next_state;
+        } tasks[64];
         game_pc_t   ptr;
         uint8_t     stack_ptr;
         bool        paused;
-        bool        fast_mode;
         int         screen_num;
         uint32_t    start_time, time_stamp;
-        int         current_task;
+        uint8_t     current_task;
     } vm;
 
     struct {
@@ -377,20 +378,21 @@ uint32_t game_save_snapshot(game_t* game, game_t* dst);
 /*-- IMPLEMENTATION ----------------------------------------------------------*/
 #ifdef GAME_IMPL
 
-#define _GFX_COL_ALPHA (0x10) // transparent pixel (OR'ed with 0x8)
-#define _GFX_COL_PAGE  (0x11) // buffer 0 pixel
-#define _GFX_COL_BMP   (0xFF) // bitmap in buffer 0 pixel
+#define _GFX_COL_ALPHA      (0x10) // transparent pixel (OR'ed with 0x8)
+#define _GFX_COL_PAGE       (0x11) // buffer 0 pixel
+#define _GFX_COL_BMP        (0xFF) // bitmap in buffer 0 pixel
 #define _GFX_FMT_CLUT       (0)
 #define _GFX_FMT_RGB555     (1)
 #define _GFX_FMT_RGB        (2)
 #define _GFX_FMT_RGBA       (3)
 
 #define _GAME_ENTRIES_COUNT (146)
+#define _GAME_INACTIVE_TASK (0xFFFF)
 
-#define _GAME_FRAC_BITS                  (16)
-#define _GAME_FRAC_MASK                  ((1 << _GAME_FRAC_BITS) - 1)
+#define _GAME_FRAC_BITS     (16)
+#define _GAME_FRAC_MASK     ((1 << _GAME_FRAC_BITS) - 1)
 
-#define _GAME_PAULA_FREQ                 (7159092)
+#define _GAME_PAULA_FREQ    (7159092)
 
 #define _MIN(v1, v2) ((v1 < v2) ? v1 : v2)
 #define _MAX(v1, v2) ((v1 > v2) ? v1 : v2)
@@ -805,8 +807,6 @@ const game_str_entry_t _strings_table_demo[] = {
 	{ 0x1FA, "     Out of this World\nA Cinematic Action Adventure\n from Interplay Productions\n                    \n       By Eric CHAHI      \n\n  IBM version : D.MORAIS\n" },
 	{ 0xFFFF, 0 }
 };
-
-static const char* _str0x194_atari_demo = "Je signale que Monsieur\na tout de meme 40 minutes\net 21 secondes de retard.";
 
 const uint8_t _mem_list_parts[][4] = {
 	{ 0x14, 0x15, 0x16, 0x00 }, // 16000 - protection screens
@@ -1889,15 +1889,10 @@ static void _game_video_update_display(game_t* game, uint8_t page) {
 
 static void _game_video_draw_string(game_t* game, uint8_t color, uint16_t x, uint16_t y, uint16_t strId) {
 	bool escapedChars = false;
-	const char *str = 0;
-	if (game->res.data_type == DT_ATARI_DEMO && strId == 0x194) {
-		str = _str0x194_atari_demo;
-	} else {
-		str = _find_string(game->strings_table, strId);
-		if (!str && game->res.data_type == DT_DOS) {
-			str = _find_string(_strings_table_demo, strId);
-		}
-	}
+	const char* str = _find_string(game->strings_table, strId);
+    if (!str && game->res.data_type == DT_DOS) {
+        str = _find_string(_strings_table_demo, strId);
+    }
 	if (!str) {
 		_warning("Unknown string id %d", strId);
 		return;
@@ -2314,37 +2309,10 @@ static void _game_res_read_entries(game_t* game) {
             }
 		}
 		break;
-    case DT_ATARI_DEMO:
-        GAME_ASSERT(false);
+    default:
+	    error("No data files found");
         break;
-    // TODO:
-	// case DT_ATARI_DEMO: {
-	// 		File f;
-	// 		if (f.open(atariDemo, _dataDir)) {
-	// 			static const struct {
-	// 				uint8_t type;
-	// 				uint8_t num;
-	// 				uint32_t offset;
-	// 				uint16_t size;
-	// 			} data[] = {
-	// 				{ RT_SHAPE, 0x19, 0x50f0, 65146 },
-	// 				{ RT_PALETTE, 0x17, 0x14f6a, 2048 },
-	// 				{ RT_BYTECODE, 0x18, 0x1576a, 8368 }
-	// 			};
-	// 			_numMemList = ENTRIES_COUNT;
-	// 			for (int i = 0; i < 3; ++i) {
-	// 				MemEntry *entry = &_memList[data[i].num];
-	// 				entry->type = data[i].type;
-	// 				entry->bank_num = 15;
-	// 				entry->bank_pos = data[i].offset;
-	// 				entry->packed_size = entry->unpacked_size = data[i].size;
-	// 			}
-	// 			return;
-	// 		}
-	// 	}
-	// 	break;
 	}
-	error("No data files found");
 }
 
 static void _game_res_invalidate(game_t* game) {
@@ -2672,7 +2640,6 @@ static void _snd_playSound(game_t* game, uint16_t resNum, uint8_t freq, uint8_t 
 	switch (game->res.data_type) {
 	case DT_AMIGA:
 	case DT_ATARI:
-	case DT_ATARI_DEMO:
 	case DT_DOS: {
 			game_mem_entry_t *me = &game->res.mem_list[resNum];
 			if (me->status == GAME_RES_STATUS_LOADED) {
@@ -2742,7 +2709,7 @@ static void _op_install_task(game_t* game) {
 	uint16_t n = _fetch_word(&game->vm.ptr);
 	_debug(GAME_DBG_SCRIPT, "Script::op_installTask(0x%X, 0x%X)", i, n);
 	GAME_ASSERT(i < 0x40);
-	game->vm.tasks[1][i] = n;
+	game->vm.tasks[i].next_pc = n;
 }
 
 static void _op_jmp_if_var(game_t* game) {
@@ -2873,11 +2840,11 @@ static void _op_changeTasksState(game_t* game) {
 
 	if (state == 2) {
 		for (; start <= end; ++start) {
-			game->vm.tasks[1][start] = 0xFFFE;
+			game->vm.tasks[start].next_pc = _GAME_INACTIVE_TASK - 1;
 		}
 	} else if (state < 2) {
 		for (; start <= end; ++start) {
-			game->vm.states[1][start] = state;
+			game->vm.tasks[start].next_state = state;
 		}
 	}
 }
@@ -2935,7 +2902,7 @@ static void _op_updateDisplay(game_t* game) {
     }
 
 	const int frameHz = 50;
-	if (!game->vm.fast_mode && game->vm.vars[GAME_VAR_PAUSE_SLICES] != 0) {
+	if (game->vm.vars[GAME_VAR_PAUSE_SLICES] != 0) {
 		const int delay = game->elapsed - game->vm.time_stamp;
 		const int pause = game->vm.vars[GAME_VAR_PAUSE_SLICES] * 1000 / frameHz - delay;
 		if (pause > 0) {
@@ -3126,9 +3093,13 @@ static void _game_vm_restart_at(game_t* game, int part, int pos) {
 		game->vm.vars[0x54] = awTitleScreen ? 0x1 : 0x81;
 	}
 	_game_res_setup_part(game, part);
-	memset(game->vm.tasks, 0xFF, sizeof(game->vm.tasks));
-	memset(game->vm.states, 0, sizeof(game->vm.states));
-	game->vm.tasks[0][0] = 0;
+    for(uint8_t i=0;i<64;i++) {
+        game->vm.tasks[i].pc = _GAME_INACTIVE_TASK;
+        game->vm.tasks[i].next_pc = _GAME_INACTIVE_TASK;
+        game->vm.tasks[i].state = 0;
+        game->vm.tasks[i].next_state = 0;
+    }
+    game->vm.tasks[0].pc = 0;
 	game->vm.screen_num = -1;
 	if (pos >= 0) {
 		game->vm.vars[0] = pos;
@@ -3147,11 +3118,11 @@ static void _game_vm_setup_tasks(game_t* game) {
 		game->res.next_part = 0;
 	}
 	for (int i = 0; i < 0x40; ++i) {
-		game->vm.states[0][i] = game->vm.states[1][i];
-		uint16_t n = game->vm.tasks[1][i];
-		if (n != 0xFFFF) {
-			game->vm.tasks[0][i] = (n == 0xFFFE) ? 0xFFFF : n;
-			game->vm.tasks[1][i] = 0xFFFF;
+		game->vm.tasks[i].state = game->vm.tasks[i].next_state;
+		uint16_t n = game->vm.tasks[i].next_pc;
+		if (n != _GAME_INACTIVE_TASK) {
+			game->vm.tasks[i].pc = (n == _GAME_INACTIVE_TASK - 1) ? _GAME_INACTIVE_TASK : n;
+			game->vm.tasks[i].next_pc = _GAME_INACTIVE_TASK;
 		}
 	}
 }
@@ -3289,15 +3260,15 @@ static void _game_vm_execute_task(game_t* game) {
 static bool _game_vm_run(game_t* game) {
     const int i = game->vm.current_task;
     if(!game->input.quit) {
-		if (game->vm.states[0][i] == 0) {
-			uint16_t n = game->vm.tasks[0][i];
-			if (n != 0xFFFF) {
+		if (game->vm.tasks[i].state == 0) {
+			uint16_t n = game->vm.tasks[i].pc;
+			if (n != _GAME_INACTIVE_TASK) {
 				game->vm.ptr.pc = game->res.seg_code + n;
 				game->vm.paused = false;
 				_debug(GAME_DBG_SCRIPT, "Script::runTasks() i=0x%02X n=0x%02X", i, n);
                 _game_vm_execute_task(game);
-				game->vm.tasks[0][i] = game->vm.ptr.pc - game->res.seg_code;
-				_debug(GAME_DBG_SCRIPT, "Script::runTasks() i=0x%02X pos=0x%X", i, game->vm.tasks[0][i]);
+				game->vm.tasks[i].pc = game->vm.ptr.pc - game->res.seg_code;
+				_debug(GAME_DBG_SCRIPT, "Script::runTasks() i=0x%02X pos=0x%X", i, game->vm.tasks[i].pc);
                 if(!game->vm.paused) {
                     return false;
                 }
@@ -3308,7 +3279,7 @@ static bool _game_vm_run(game_t* game) {
    // go to next active thread
    do {
         game->vm.current_task = (game->vm.current_task + 1) % 0x40;
-    } while (game->vm.current_task !=0 && game->vm.tasks[0][game->vm.current_task] == 0xFFFF);
+    } while (game->vm.current_task !=0 && game->vm.tasks[game->vm.current_task].pc == _GAME_INACTIVE_TASK);
     game->vm.stack_ptr = 0;
 
     return game->vm.current_task == 0;
@@ -3324,9 +3295,6 @@ void game_init(game_t* game, const game_desc_t* desc) {
     game->debug = desc->debug;
     game->part_num = desc->part_num;
     game->res.lang = desc->lang;
-    if (desc->demo3_joy_size && game->res.data_type == DT_DOS) {
-		_demo3_joy_read(game, desc->demo3_joy, desc->demo3_joy_size);
-	}
     game->audio.callback = desc->audio.callback;
     _game_audio_init(game, desc->audio.callback);
     game->video.use_ega = desc->use_ega;
@@ -3335,6 +3303,9 @@ void game_init(game_t* game, const game_desc_t* desc) {
 void game_start(game_t* game, game_data_t data) {
     GAME_ASSERT(game && game->valid);
     game->res.data = data;
+    if (data.demo3_joy.size && game->res.data_type == DT_DOS) {
+        _demo3_joy_read(game, data.demo3_joy.ptr, data.demo3_joy.size);
+    }
 
     g_debugMask = GAME_DBG_INFO | GAME_DBG_VIDEO | GAME_DBG_SND | GAME_DBG_SCRIPT | GAME_DBG_BANK;
     _game_res_detect_version(game);
@@ -3348,11 +3319,9 @@ void game_start(game_t* game, game_data_t data) {
 
     game->vm.vars[GAME_VAR_RANDOM_SEED] = time(0);
     if(!game->enable_protection) {
-        // these 3 variables are set by the game code
         game->vm.vars[0xBC] = 0x10;
         game->vm.vars[0xC6] = 0x80;
         game->vm.vars[0xF2] = (game->res.data_type == DT_AMIGA || game->res.data_type == DT_ATARI) ? 6000 : 4000;
-        // these 2 variables are set by the engine executable
         game->vm.vars[0xDC] = 33;
     }
 
@@ -3364,7 +3333,6 @@ void game_start(game_t* game, game_data_t data) {
     case DT_DOS:
     case DT_AMIGA:
     case DT_ATARI:
-    case DT_ATARI_DEMO:
         switch (game->res.lang) {
         case GAME_LANG_FR:
             game->strings_table = _strings_table_fr;
@@ -3480,7 +3448,7 @@ gfx_display_info_t game_display_info(game_t* game) {
 }
 
 void game_key_down(game_t* game, game_input_t input) {
-    (void)game;
+    GAME_ASSERT(game && game->valid);
     switch(input) {
         case GAME_INPUT_LEFT:   game->input.dir_mask |= DIR_LEFT; break;
         case GAME_INPUT_RIGHT:  game->input.dir_mask |= DIR_RIGHT; break;
@@ -3494,7 +3462,7 @@ void game_key_down(game_t* game, game_input_t input) {
 }
 
 void game_key_up(game_t* game, game_input_t input) {
-    (void)game;
+    GAME_ASSERT(game && game->valid);
     switch(input) {
         case GAME_INPUT_LEFT:   game->input.dir_mask &= ~DIR_LEFT; break;
         case GAME_INPUT_RIGHT:  game->input.dir_mask &= ~DIR_RIGHT; break;
@@ -3508,11 +3476,12 @@ void game_key_up(game_t* game, game_input_t input) {
 }
 
 void game_char_pressed(game_t* game, int c) {
-    (void)game;
+    GAME_ASSERT(game && game->valid);
     game->input.last_char = (char)c;
 }
 
 bool game_get_res_buf(game_t* game, int id, uint8_t* dst) {
+    GAME_ASSERT(game && game->valid);
     game_mem_entry_t* me = &game->res.mem_list[id];
     return _game_res_read_bank(game, me, dst);
 }
