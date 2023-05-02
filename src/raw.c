@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <ctype.h>
 #include "sokol_app.h"
 #include "sokol_args.h"
 #include "sokol_audio.h"
@@ -192,6 +193,18 @@ static void _game_start(void) {
     sapp_set_window_title(state.game.title);
 }
 
+int _game_strnicmp(const char* a, const char* b, size_t i)
+{
+    for (;; a++, b++, i--) {
+        int d = tolower(*a) - tolower(*b);
+        if(!i)
+            return 0;
+        if (d != 0 || !*a)
+            return d;
+    }
+    return 0;
+}
+
 bool _game_load_data(gfx_range_t data) {
     memset(&state.data, 0, sizeof(state.data));
     mz_zip_archive archive;
@@ -202,13 +215,13 @@ bool _game_load_data(gfx_range_t data) {
     bool result = false;
     for(mz_uint i=0; i<num; i++) {
         mz_zip_reader_file_stat(&archive, i, &stat);
-        if(strncmp(stat.m_filename, "memlist.bin", 11) == 0) {
+        if(_game_strnicmp(stat.m_filename, "memlist.bin", 11) == 0) {
             result = true;
             void* ptr = malloc(stat.m_uncomp_size);
             mz_zip_reader_extract_to_mem(&archive, i, ptr, stat.m_uncomp_size, 0);
             state.data.mem_list.size = stat.m_uncomp_size;
             state.data.mem_list.ptr = ptr;
-        } else if(strncmp(stat.m_filename, "bank", 4) == 0) {
+        } else if(_game_strnicmp(stat.m_filename, "bank", 4) == 0) {
             result = true;
             int bank_n = _to_num(stat.m_filename[5]);
             void* ptr = malloc(stat.m_uncomp_size);
