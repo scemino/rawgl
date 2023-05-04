@@ -426,7 +426,7 @@ static void _ui_game_draw_video(ui_game_t* ui) {
                     ui->game->gfx.palette[col] = (ImU32)c;
                 }
                 ImGui::PopID();
-                if (col != 4) {
+                if (col != 7) {
                     ImGui::SameLine();
                 }
             }
