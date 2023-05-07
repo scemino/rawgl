@@ -60,6 +60,7 @@ extern "C" {
 
 #define GAME_ENTRIES_COUNT_20TH         (178)
 #define GAME_MEM_BLOCK_SIZE             (1 * 1024 * 1024)
+#define GAME_NUM_TASKS                  (64)
 
 #define GAME_RES_STATUS_NULL            (0)
 #define GAME_RES_STATUS_LOADED          (1)
@@ -324,7 +325,7 @@ typedef struct {
             uint16_t next_pc;
             uint8_t  state;
             uint8_t  next_state;
-        } tasks[64];
+        } tasks[GAME_NUM_TASKS];
         game_pc_t   ptr;
         uint8_t     stack_ptr;
         bool        paused;
@@ -2708,7 +2709,7 @@ static void _op_install_task(game_t* game) {
 	uint8_t i = _fetch_byte(&game->vm.ptr);
 	uint16_t n = _fetch_word(&game->vm.ptr);
 	_debug(GAME_DBG_SCRIPT, "Script::op_installTask(0x%X, 0x%X)", i, n);
-	GAME_ASSERT(i < 0x40);
+	GAME_ASSERT(i < GAME_NUM_TASKS);
 	game->vm.tasks[i].next_pc = n;
 }
 
@@ -3093,7 +3094,7 @@ static void _game_vm_restart_at(game_t* game, int part, int pos) {
 		game->vm.vars[0x54] = awTitleScreen ? 0x1 : 0x81;
 	}
 	_game_res_setup_part(game, part);
-    for(uint8_t i=0;i<64;i++) {
+    for(uint8_t i=0; i<GAME_NUM_TASKS; i++) {
         game->vm.tasks[i].pc = _GAME_INACTIVE_TASK;
         game->vm.tasks[i].next_pc = _GAME_INACTIVE_TASK;
         game->vm.tasks[i].state = 0;
@@ -3117,7 +3118,7 @@ static void _game_vm_setup_tasks(game_t* game) {
         _game_vm_restart_at(game, game->res.next_part, -1);
 		game->res.next_part = 0;
 	}
-	for (int i = 0; i < 0x40; ++i) {
+	for (int i = 0; i < GAME_NUM_TASKS; ++i) {
 		game->vm.tasks[i].state = game->vm.tasks[i].next_state;
 		uint16_t n = game->vm.tasks[i].next_pc;
 		if (n != _GAME_INACTIVE_TASK) {
@@ -3258,31 +3259,44 @@ static void _game_vm_execute_task(game_t* game) {
 }
 
 static bool _game_vm_run(game_t* game) {
-    const int i = game->vm.current_task;
-    if(!game->input.quit) {
-		if (game->vm.tasks[i].state == 0) {
-			uint16_t n = game->vm.tasks[i].pc;
-			if (n != _GAME_INACTIVE_TASK) {
-				game->vm.ptr.pc = game->res.seg_code + n;
-				game->vm.paused = false;
-				_debug(GAME_DBG_SCRIPT, "Script::runTasks() i=0x%02X n=0x%02X", i, n);
-                _game_vm_execute_task(game);
-				game->vm.tasks[i].pc = game->vm.ptr.pc - game->res.seg_code;
-				_debug(GAME_DBG_SCRIPT, "Script::runTasks() i=0x%02X pos=0x%X", i, game->vm.tasks[i].pc);
-                if(!game->vm.paused) {
-                    return false;
-                }
-			}
-		}
-	}
+    int i = game->vm.current_task;
+    if(!game->input.quit && game->vm.tasks[i].state == 0) {
+        uint16_t n = game->vm.tasks[i].pc;
+        if (n != _GAME_INACTIVE_TASK) {
+            // execute 1 step of 1 task
+            game->vm.ptr.pc = game->res.seg_code + n;
+            game->vm.paused = false;
+            _debug(GAME_DBG_SCRIPT, "Script::runTasks() i=0x%02X n=0x%02X", i, n);
+            _game_vm_execute_task(game);
+            game->vm.tasks[i].pc = game->vm.ptr.pc - game->res.seg_code;
+            _debug(GAME_DBG_SCRIPT, "Script::runTasks() i=0x%02X pos=0x%X", i, game->vm.tasks[i].pc);
+            if(!game->vm.paused && game->vm.tasks[i].pc != _GAME_INACTIVE_TASK) {
+                return false;
+            }
+        }
+    }
 
-   // go to next active thread
-   do {
-        game->vm.current_task = (game->vm.current_task + 1) % 0x40;
-    } while (game->vm.current_task !=0 && game->vm.tasks[game->vm.current_task].pc == _GAME_INACTIVE_TASK);
-    game->vm.stack_ptr = 0;
+    i = (i + 1) % GAME_NUM_TASKS;
+    bool result = false;
 
-    return game->vm.current_task == 0;
+    do {
+        if (i == 0) {
+            _game_vm_setup_tasks(game);
+            _game_vm_update_input(game);
+        }
+        
+        if (game->vm.tasks[i].pc != _GAME_INACTIVE_TASK) {
+            game->vm.stack_ptr = 0;
+            game->vm.current_task = i;
+            break;
+        }
+        
+        // go to next active thread
+        i = (i + 1) % GAME_NUM_TASKS;
+        result |= (i == 0);
+    } while(true);
+
+    return result;
 }
 
 // Game
@@ -3374,17 +3388,13 @@ void game_exec(game_t* game, uint32_t ms) {
     GAME_ASSERT(game && game->valid);
     game->elapsed += ms;
 
-    if(game->vm.current_task == 0) {
-        if(game->sleep) {
-            if(ms > game->sleep) {
-                game->sleep = 0;
-            } else {
-                game->sleep -= ms;
-            }
-            return;
+    if(game->sleep) {
+        if(ms > game->sleep) {
+            game->sleep = 0;
+        } else {
+            game->sleep -= ms;
         }
-        _game_vm_setup_tasks(game);
-        _game_vm_update_input(game);
+        return;
     }
 
     bool stopped = false;
@@ -3397,7 +3407,7 @@ void game_exec(game_t* game, uint32_t ms) {
             stopped = *game->debug.stopped;
             if(!stopped) {
                 stopped |= _game_vm_run(game);
-                game->debug.callback.func(game->debug.callback.user_data, game->vm.ptr.pc - game->res.seg_code);
+                game->debug.callback.func(game->debug.callback.user_data, game->vm.tasks[game->vm.current_task].pc);
             } else {
                 game->sleep = 0;
             }

@@ -129,7 +129,6 @@ typedef struct ui_dbg_texture_callbacks_t {
 
 typedef struct ui_dbg_desc_t {
     const char* title;          /* window title */
-    game_t* game;
     ui_dbg_read_t read_cb;          /* callback to read memory */
     int read_layer;                 /* layer argument for read_cb */
     ui_dbg_user_break_t break_cb;   /* optional user-breakpoint evaluation callback */
@@ -153,7 +152,6 @@ typedef struct ui_dbg_dasm_t {
 
 /* debugger state */
 typedef struct ui_dbg_state_t {
-    game_t* game;
     bool stopped;
     int step_mode;
     uint64_t last_tick_pins;    // cpu pins in last tick
@@ -452,8 +450,6 @@ static void _ui_dbg_history_draw(ui_dbg_t* win) {
 /*== DEBUGGER STATE ==========================================================*/
 static void _ui_dbg_dbgstate_init(ui_dbg_t* win, ui_dbg_desc_t* desc) {
     ui_dbg_state_t* dbg = &win->dbg;
-    GAME_ASSERT(desc->game);
-    dbg->game = desc->game;
     dbg->delete_breakpoint_index = -1;
 }
 
@@ -538,6 +534,7 @@ static int _ui_dbg_eval_op_breakpoints(ui_dbg_t* win, int trap_id, uint16_t pc) 
 
 //  evaluate per-tick breakpoints, only call this if is dbg.step_mode is UI_DBG_STEPMODE_NONE!
 static int _ui_dbg_eval_tick_breakpoints(ui_dbg_t* win, int trap_id, uint64_t pins) {
+    game_t* game = (game_t*)win->user_data;
     uint64_t rising_pins = pins & (pins ^ win->dbg.last_tick_pins);
     for (int i = 0; (i < win->dbg.num_breakpoints) && (trap_id == 0); i++) {
         const ui_dbg_breakpoint_t* bp = &win->dbg.breakpoints[i];
@@ -546,7 +543,7 @@ static int _ui_dbg_eval_tick_breakpoints(ui_dbg_t* win, int trap_id, uint64_t pi
                 case UI_DBG_BREAKTYPE_OUT:
                 case UI_DBG_BREAKTYPE_IN:
                     const uint16_t mask = bp->val;
-                    if((win->dbg.game->vm.ptr.pc - win->dbg.game->res.seg_code) == (bp->addr & mask)) {
+                    if((game->vm.ptr.pc - game->res.seg_code) == (bp->addr & mask)) {
                         trap_id = UI_DBG_BP_BASE_TRAPID + i;
                     }
                     break;
@@ -1162,8 +1159,9 @@ static bool _ui_dbg_line_array_needs_update(ui_dbg_t* win, uint16_t addr) {
 }
 
 static void _ui_dbg_draw_main(ui_dbg_t* win) {
+    game_t* game = (game_t*)win->user_data;
     const float line_height = ImGui::GetTextLineHeight();
-    ImGui::Text("Task: %u", win->dbg.game->vm.current_task);
+    ImGui::Text("Task: %u", game->vm.current_task);
     ImGui::SetNextWindowContentSize(ImVec2(0, UI_DBG_NUM_LINES * line_height));
     ImGui::BeginChild("##main", ImGui::GetContentRegionAvail(), false);
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0,0));

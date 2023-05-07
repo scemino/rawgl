@@ -179,14 +179,17 @@ static void _ui_dasm_disasm(ui_dasm_t* win) {
 
 static bool _ui_dasm_jumptarget(ui_dasm_t* win, uint16_t pc, uint16_t* out_addr) {
     switch (win->bin_buf[0]) {
-        case 0x04:
-        case 0x07:
+        case 0x04: // jsr
+        case 0x07: // jmp
             *out_addr = win->bin_buf[2] | win->bin_buf[1] << 8;
             return true;
-        case 0x09:
+        case 0x08: // setvec
             *out_addr = win->bin_buf[3] | win->bin_buf[2]  << 8;
             return true;
-        case 0x0a:
+        case 0x09: // if var
+            *out_addr = win->bin_buf[3] | win->bin_buf[2]  << 8;
+            return true;
+        case 0x0a: // if exp
             uint8_t op = win->bin_buf[2];
             uint8_t off = (op & 0x40) ? 2: 1;
             *out_addr = win->bin_buf[3+off] | win->bin_buf[2+off] << 8;

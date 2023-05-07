@@ -183,7 +183,7 @@ uint16_t raw_dasm_op(uint16_t pc, raw_dasm_input_t in_cb, raw_dasm_output_t out_
             _FETCH_I16(i16); _STR_U16(i16);
         } break;
         case 0x0b: _FETCH_U16(u16); _STR("fade "); _STR_U16(u16);  break; // setPalette
-        case 0x0c: _FETCH_U8(u8); _STR("TSK ST "); _STR_U8(u8); _CHR(','); _FETCH_U8(u8); _STR_U8(u8); _CHR(','); _FETCH_U8(u8); _STR_U8(u8); break; // changeTasksState
+        case 0x0c: _FETCH_U8(u8); _STR("vec "); _STR_U8(u8); _CHR(','); _FETCH_U8(u8); _STR_U8(u8); _CHR(','); _FETCH_U8(u8); _STR_U8(u8); break; // changeTasksState
         case 0x0d: _FETCH_U8(u8); _STR("setws "); _STR_U8(u8); break; // selectPage
         case 0x0e: _FETCH_U8(u8); _STR("clr "); _STR_U8(u8); _FETCH_U8(u8); _STR_U8(u8); break; // fillPage
         case 0x0f: _FETCH_U8(u8); _STR("copy "); _STR_U8(u8); _FETCH_U8(u8); _STR_U8(u8); break; // copyPage

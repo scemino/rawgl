@@ -207,11 +207,14 @@ static void _ui_game_draw_vm(ui_game_t* ui) {
         }
         if (ImGui::CollapsingHeader("Tasks", ImGuiTreeNodeFlags_DefaultOpen)) {
             if (ImGui::BeginTable("##tasks", 6, ImGuiTableFlags_Resizable | ImGuiTableFlags_NoSavedSettings)) {
+                const ImU32 active_color = 0xFF00FFFF;
+                const ImU32 normal_color = 0xFFFFFFFF;
+
                 ImGui::TableSetupColumn("#");
                 ImGui::TableSetupColumn("offset");
                 ImGui::TableHeadersRow();
 
-                for(int i=0; i<64; i++) {
+                for(int i=0; i<GAME_NUM_TASKS; i++) {
                     uint16_t offset = ui->game->vm.tasks[i].pc;
 
                     if(offset == 0xffff) continue;
@@ -219,8 +222,10 @@ static void _ui_game_draw_vm(ui_game_t* ui) {
                     ImGui::TableNextRow();
                     ImGui::TableNextColumn();
                     ImGui::PushID(i);
+                    ImGui::PushStyleColor(ImGuiCol_Text, ui->game->vm.current_task == i?active_color:normal_color);
                     ImGui::Text("%u", i); ImGui::TableNextColumn();
-                    ImGui::Text("%x", offset); ImGui::TableNextColumn();
+                    ImGui::Text("%04X", offset); ImGui::TableNextColumn();
+                    ImGui::PopStyleColor();
                     ImGui::PopID();
                 }
                 ImGui::EndTable();
@@ -464,7 +469,6 @@ void ui_game_init(ui_game_t* ui, const ui_game_desc_t* ui_desc) {
         desc.title = "CPU Debugger";
         desc.x = 10;
         desc.y = 20;
-        desc.game = ui->game;
         desc.read_cb = _ui_raw_mem_read;
         desc.texture_cbs = ui_desc->dbg_texture;
         desc.keys = ui_desc->dbg_keys;
