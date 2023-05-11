@@ -14,7 +14,7 @@ The program requires the original data files.
 - DOS (Bank*, memlist.bin)
 - DOS demo (Demo*, memlist.bin)
 
-## Running
+## Run it
 
 Drag'n'drop a zip containing the data files.
 
@@ -37,7 +37,7 @@ In game hotkeys :
 
 ## Try it
 
-You can play it online [here](https://scemino.github.io/raw_wp/)
+You can play it online [here](https://scemino.github.io/raw_wp/) and drag'n'drop a zip containing the data files.
 
 ## Features
 
@@ -50,9 +50,5 @@ You can play it online [here](https://scemino.github.io/raw_wp/)
 
 - **Gregory Montoir** for his awesome project [rawgl](https://github.com/cyxx/rawgl)
 - **flooh** for his library [sokol](https://github.com/floooh/sokol)
-
-## Technical Details
-
-- [Amiga/DOS](docs/Amiga_DOS.md)
-- [3DO](docs/3DO.md)
-- [WiiU](docs/WiiU.md)
+- **Omar** for [dearimgui](https://github.com/ocornut/imgui)
+- **Eric Chahi** for [Another world](http://www.anotherworld.fr/another_world.htm)

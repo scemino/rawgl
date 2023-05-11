@@ -17,7 +17,7 @@ systems = [
 
 #-------------------------------------------------------------------------------
 def deploy_webpage(fips_dir, proj_dir, webpage_dir) :
-    emsc_deploy_dir = util.get_deploy_dir(fips_dir, 'raw', BuildConfig)
+    emsc_deploy_dir = util.get_deploy_dir(fips_dir, 'rawgl', BuildConfig)
 
     # generate emu HTML pages
     for system in systems :
@@ -35,7 +35,7 @@ def deploy_webpage(fips_dir, proj_dir, webpage_dir) :
 #-------------------------------------------------------------------------------
 def build_deploy_webpage(fips_dir, proj_dir, rebuild) :
     # if webpage dir exists, clear it first
-    proj_build_dir = util.get_deploy_root_dir(fips_dir, 'raw')
+    proj_build_dir = util.get_deploy_root_dir(fips_dir, 'rawgl')
     webpage_dir = '{}/raw'.format(proj_build_dir)
     if rebuild :
         if os.path.isdir(webpage_dir) :
@@ -54,7 +54,7 @@ def build_deploy_webpage(fips_dir, proj_dir, rebuild) :
 
 #-------------------------------------------------------------------------------
 def serve_webpage(fips_dir, proj_dir) :
-    proj_build_dir = util.get_deploy_root_dir(fips_dir, 'raw')
+    proj_build_dir = util.get_deploy_root_dir(fips_dir, 'rawgl')
     webpage_dir = '{}/raw'.format(proj_build_dir)
     p = util.get_host_platform()
     if p == 'osx' :
