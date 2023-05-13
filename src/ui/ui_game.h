@@ -59,6 +59,11 @@ typedef struct {
     void* tex_bmp;
     uint8_t buf[GAME_WIDTH*GAME_HEIGHT*4];
     int selected;
+    struct {
+        int pal_idx;
+        int pal_res_idx;
+        bool pal_ovw;
+    } data;
     bool filters[7];
 } ui_game_res_t;
 
@@ -293,23 +298,28 @@ static void _ui_game_get_pal(ui_game_t* ui, int res_id, int id, uint32_t pal[16]
 
 static void _ui_game_get_pal_for_res(ui_game_t* ui, int res_id, uint32_t pal[16]) {
     static uint8_t _res[] = {
-        0x12, 0x14, 4,
-        0x13, 0x14, 8,
-        0x43, 0x17, 3,
-        0x44, 0x20, 8,
-        0x45, 0x20, 8,
-        0x46, 0x20, 8,
-        0x47, 0x14, 2,
-        0x48, 0x7d, 7,
-        0x49, 0x7d, 7,
-        0x53, 0x7d, 7,
-        0x90, 0x26, 3,
-        0x91, 0x26, 1
+        0x12, 0, 4,
+        0x13, 0, 10,
+        0x43, 4, 6,
+        0x44, 4, 8,
+        0x45, 4, 8,
+        0x46, 4, 8,
+        0x47, 0, 2,
+        0x48, 8, 7,
+        0x49, 8, 7,
+        0x53, 0, 10,
+        0x90, 6, 3,
+        0x91, 6, 1
     };
+    static uint8_t _res_ids[] = { 0x14, 0x17, 0x1a, 0x1d, 0x20, 0x23, 0x26, 0x29, 0x7d };
 
     for(int i=0; i<12; i++) {
         if(_res[i*3] == res_id) {
-            _ui_game_get_pal(ui, _res[i*3+1], _res[i*3+2], pal);
+            if(!ui->res.data.pal_ovw) {
+                ui->res.data.pal_idx = _res[i*3+2];
+                ui->res.data.pal_res_idx = _res[i*3+1];
+            }
+            _ui_game_get_pal(ui, _res_ids[ui->res.data.pal_res_idx], ui->res.data.pal_idx, pal);
         }
     }
 }
@@ -341,9 +351,15 @@ static void _ui_game_draw_sel_res(ui_game_t* ui) {
         uint8_t buffer[GAME_WIDTH*GAME_HEIGHT/2];
         _ui_game_get_pal_for_res(ui, ui->res.selected, pal);
         if(game_get_res_buf(ui->game, ui->res.selected, buffer)) {
+            static const char* _res_ids[] = { "0x14", "0x17", "0x1a", "0x1d", "0x20", "0x23", "0x26", "0x29", "0x7d" };
             decode_amiga(buffer, (uint32_t*)ui->res.buf, pal);
             ui->video.texture_cbs.update_cb(ui->res.tex_bmp, ui->res.buf, GAME_WIDTH*GAME_HEIGHT*sizeof(uint32_t));
             ImGui::Image(ui->res.tex_bmp, ImVec2(GAME_WIDTH, GAME_HEIGHT));
+            ImGui::Checkbox("Palette overwrite", &ui->res.data.pal_ovw);
+            ImGui::BeginDisabled(!ui->res.data.pal_ovw);
+            ImGui::SliderInt("Palette res", &ui->res.data.pal_res_idx, 0, 8, _res_ids[ui->res.data.pal_res_idx]);
+            ImGui::SliderInt("Palette id", &ui->res.data.pal_idx, 0, 15);
+            ImGui::EndDisabled();
         } else {
             ImGui::Text("Not available");
         }
@@ -387,6 +403,7 @@ static void _ui_game_draw_resources(ui_game_t* ui) {
                 if(e->status == 0xFF) break;
 
                 if(ui->res.filters[e->type]) continue;
+                if(ui->game->res.data.banks[e->bank_num-1].size == 0) continue;
 
                 ImGui::TableNextRow(0, 20.f);
                 ImGui::TableNextColumn();
