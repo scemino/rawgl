@@ -469,13 +469,17 @@ static void _ui_game_draw_video(ui_game_t* ui) {
     ImGui::End();
 }
 
-static uint8_t _ui_raw_mem_read(int layer, uint16_t addr, void* user_data) {
+static uint8_t _ui_raw_mem_read(int layer, uint16_t addr, bool* valid, void* user_data) {
     GAME_ASSERT(user_data);
     (void)layer;
     game_t* game = (game_t*) user_data;
     uint8_t* pc = game->res.seg_code;
-    if (pc == NULL) return 0;
-    return pc[addr];
+    *valid = false;
+    if (pc != NULL && addr >= 0 && addr < game->res.seg_code_size) {
+        *valid = true;
+        return pc[addr];
+    }
+    return 0;
 }
 
 void ui_game_init(ui_game_t* ui, const ui_game_desc_t* ui_desc) {

@@ -99,16 +99,7 @@ static void _raw_dasm_str(const char* str, raw_dasm_output_t out_cb, void* user_
     }
 }
 
-/* helper function to output an unsigned 8-bit value as hex string */
-static void _raw_dasm_hex8(uint8_t val, raw_dasm_output_t out_cb, void* user_data) {
-    if (out_cb) {
-        out_cb('$', user_data);
-        for (int i = 1; i >= 0; i--) {
-            out_cb(_raw_dasm_hex[(val>>(i*4)) & 0xF], user_data);
-        }
-    }
-}
-
+/* helper function to output an unsigned 8-bit value as decimal string */
 static void _raw_dasm_u8(uint8_t val, raw_dasm_output_t out_cb, void* user_data) {
     if (out_cb) {
         if (val == 0) {
@@ -185,16 +176,16 @@ uint16_t raw_dasm_op(uint16_t pc, raw_dasm_input_t in_cb, raw_dasm_output_t out_
         case 0x0b: _FETCH_U16(u16); _STR("fade "); _STR_U16(u16);  break; // setPalette
         case 0x0c: _FETCH_U8(u8); _STR("vec "); _STR_U8(u8); _CHR(','); _FETCH_U8(u8); _STR_U8(u8); _CHR(','); _FETCH_U8(u8); _STR_U8(u8); break; // changeTasksState
         case 0x0d: _FETCH_U8(u8); _STR("setws "); _STR_U8(u8); break; // selectPage
-        case 0x0e: _FETCH_U8(u8); _STR("clr "); _STR_U8(u8); _FETCH_U8(u8); _STR_U8(u8); break; // fillPage
-        case 0x0f: _FETCH_U8(u8); _STR("copy "); _STR_U8(u8); _FETCH_U8(u8); _STR_U8(u8); break; // copyPage
+        case 0x0e: _FETCH_U8(u8); _STR("clr "); _STR_U8(u8); _FETCH_U8(u8); _CHR(' '); _STR_U8(u8); break; // fillPage
+        case 0x0f: _FETCH_U8(u8); _STR("copy "); _STR_U8(u8); _FETCH_U8(u8); _CHR(' '); _STR_U8(u8); break; // copyPage
         case 0x10: _FETCH_U8(u8); _STR("show "); _STR_U8(u8); break; // updateDisplay
         case 0x11: _STR("bigend"); break; // removeTask
         case 0x12: _FETCH_U16(u16); _STR("text "); _STR_U16(u16); _CHR(' '); _FETCH_U8(u8); _STR_U8(u8); _CHR(' '); _FETCH_U8(u8); _STR_U8(u8); _CHR(' '); _FETCH_U8(u8); _STR_U8(u8); break; // text "text number", x, y, color
-        case 0x13: _FETCH_U8(u8); _STR("v"); _STR_U8(u8); _STR("-="); _FETCH_U8(u8); _STR("v "); _STR_U8(u8); break; // sub
-        case 0x14: _FETCH_U8(u8); _STR("v"); _STR_U8(u8); _STR("&="); _FETCH_U16(u16); _STR_U16(u16); break; // and
-        case 0x15: _FETCH_U8(u8); _STR("v"); _STR_U8(u8); _STR("|="); _FETCH_U16(u16); _STR_U16(u16); break; // or
-        case 0x16: _FETCH_U8(u8); _STR("v"); _STR_U8(u8); _STR("<<="); _FETCH_U16(u16); _STR_U16(u16); break; // shl
-        case 0x17: _FETCH_U8(u8); _STR("v"); _STR_U8(u8); _STR(">>="); _FETCH_U16(u16); _STR_U16(u16); break; // shr
+        case 0x13: _FETCH_U8(u8); _STR("v"); _STR_U8(u8); _STR(" -= "); _FETCH_U8(u8); _STR("v"); _STR_U8(u8); break; // sub
+        case 0x14: _FETCH_U8(u8); _STR("v"); _STR_U8(u8); _STR(" &= "); _FETCH_U16(u16); _STR_U16(u16); break; // and
+        case 0x15: _FETCH_U8(u8); _STR("v"); _STR_U8(u8); _STR(" |= "); _FETCH_U16(u16); _STR_U16(u16); break; // or
+        case 0x16: _FETCH_U8(u8); _STR("v"); _STR_U8(u8); _STR(" <<= "); _FETCH_U16(u16); _STR_U16(u16); break; // shl
+        case 0x17: _FETCH_U8(u8); _STR("v"); _STR_U8(u8); _STR(" >>= "); _FETCH_U16(u16); _STR_U16(u16); break; // shr
         case 0x18: _FETCH_U16(u16); _STR("play "); _STR_U16(u16); _CHR(' '); _FETCH_U8(u8); _STR_U8(u8); _CHR(' '); _FETCH_U8(u8); _STR_U8(u8); _CHR(' '); _FETCH_U8(u8); _STR_U8(u8); break; // playSound
         case 0x19: _FETCH_U16(u16); _STR("load "); _STR_U16(u16); break; // updateResource
         case 0x1a: _FETCH_U16(u16); _STR("song "); _STR_U16(u16); _CHR(' '); _FETCH_U16(u16); _STR_U16(u16); _CHR(' '); _FETCH_U8(u8); _STR_U8(u8); break; // playMusic

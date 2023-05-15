@@ -275,6 +275,7 @@ typedef struct {
 	bool                use_seg_video2;
 	uint8_t*            seg_video_pal;
 	uint8_t*            seg_code;
+	uint16_t            seg_code_size;
 	uint8_t*            seg_video1;
 	uint8_t*            seg_video2;
 	bool                has_password_screen;
@@ -2542,6 +2543,7 @@ static void _game_res_setup_part(game_t* game, int ptrId) {
         _game_res_load(game);
         game->res.seg_video_pal = game->res.mem_list[ipal].buf_ptr;
         game->res.seg_code = game->res.mem_list[icod].buf_ptr;
+        game->res.seg_code_size = game->res.mem_list[icod].unpacked_size;
         game->res.seg_video1 = game->res.mem_list[ivd1].buf_ptr;
         if (ivd2 != 0) {
             game->res.seg_video2 = game->res.mem_list[ivd2].buf_ptr;

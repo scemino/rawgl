@@ -97,7 +97,7 @@ typedef struct ui_dbg_user_breaktype_t {
 /* forward decl */
 struct ui_dbg_t;
 /* callback for reading a byte from memory */
-typedef uint8_t (*ui_dbg_read_t)(int layer, uint16_t addr, void* user_data);
+typedef uint8_t (*ui_dbg_read_t)(int layer, uint16_t addr, bool* valid, void* user_data);
 /* callback for evaluating uer breakpoints, return breakpoint index, or -1 */
 typedef int (*ui_dbg_user_break_t)(struct ui_dbg_t* win, int trap_id, uint64_t pins, void* user_data);
 /* a callback to create a dynamic-update RGBA8 UI texture, needs to return an ImTextureID handle */
@@ -269,13 +269,13 @@ static inline const char* _ui_dbg_str_or_def(const char* str, const char* def) {
     }
 }
 
-static inline uint8_t _ui_dbg_read_byte(ui_dbg_t* win, uint16_t addr) {
-    return win->read_cb(win->read_layer, addr, win->user_data);
+static inline uint8_t _ui_dbg_read_byte(ui_dbg_t* win, uint16_t addr, bool* valid) {
+    return win->read_cb(win->read_layer, addr, valid, win->user_data);
 }
 
-static inline uint16_t _ui_dbg_read_word(ui_dbg_t* win, uint16_t addr) {
-    uint8_t l = win->read_cb(win->read_layer, addr, win->user_data);
-    uint8_t h = win->read_cb(win->read_layer, addr+1, win->user_data);
+static inline uint16_t _ui_dbg_read_word(ui_dbg_t* win, uint16_t addr, bool* valid) {
+    uint8_t l = win->read_cb(win->read_layer, addr, valid, win->user_data);
+    uint8_t h = win->read_cb(win->read_layer, addr+1, valid, win->user_data);
     return (uint16_t) (h<<8)|l;
 }
 
@@ -286,8 +286,9 @@ static inline uint16_t _ui_dbg_get_pc(ui_dbg_t* win) {
 /* disassembler callback to fetch the next instruction byte */
 static uint8_t _ui_dbg_dasm_in_cb(void* user_data) {
     ui_dbg_t* win = (ui_dbg_t*) user_data;
-    uint8_t val = _ui_dbg_read_byte(win, win->dasm.cur_addr++);
-    if (win->dasm.bin_pos < UI_DBG_MAX_BINLEN) {
+    bool valid;
+    uint8_t val = _ui_dbg_read_byte(win, win->dasm.cur_addr++, &valid);
+    if (valid && win->dasm.bin_pos < UI_DBG_MAX_BINLEN) {
         win->dasm.bin_buf[win->dasm.bin_pos++] = val;
     }
     return val;
@@ -311,7 +312,7 @@ static inline uint16_t _ui_dbg_disasm(ui_dbg_t* win, uint16_t pc) {
     return win->dasm.cur_addr;
 }
 
-/* disassemble the an instruction, but only return the length of the instruction */
+/* disassemble an instruction, but only return the length of the instruction */
 static inline uint16_t _ui_dbg_disasm_len(ui_dbg_t* win, uint16_t pc) {
     win->dasm.cur_addr = pc;
     win->dasm.str_pos = 0;
@@ -327,6 +328,7 @@ static bool _ui_dbg_is_stepover_op(uint8_t opcode) {
 
 /* check if an instruction is a control-flow op */
 static bool _ui_dbg_is_controlflow_op(uint8_t opcode0, uint8_t opcode1) {
+    (void)opcode1;
     switch(opcode0) {
     case 0x04: case 0x07: case 0x09: case 0x0a:
     return true;
@@ -449,6 +451,7 @@ static void _ui_dbg_history_draw(ui_dbg_t* win) {
 
 /*== DEBUGGER STATE ==========================================================*/
 static void _ui_dbg_dbgstate_init(ui_dbg_t* win, ui_dbg_desc_t* desc) {
+    (void)desc;
     ui_dbg_state_t* dbg = &win->dbg;
     dbg->delete_breakpoint_index = -1;
 }
@@ -492,7 +495,8 @@ static int _ui_dbg_eval_op_breakpoints(ui_dbg_t* win, int trap_id, uint16_t pc) 
 
                     case UI_DBG_BREAKTYPE_BYTE:
                         {
-                            int val = (int) _ui_dbg_read_byte(win, bp->addr);
+                            bool valid;
+                            int val = (int) _ui_dbg_read_byte(win, bp->addr, &valid);
                             bool b = false;
                             switch (bp->cond) {
                                 case UI_DBG_BREAKCOND_EQUAL:            b = val == bp->val; break;
@@ -510,7 +514,8 @@ static int _ui_dbg_eval_op_breakpoints(ui_dbg_t* win, int trap_id, uint16_t pc) 
 
                     case UI_DBG_BREAKTYPE_WORD:
                         {
-                            uint16_t val = (int) _ui_dbg_read_word(win, bp->addr);
+                            bool valid;
+                            uint16_t val = (int) _ui_dbg_read_word(win, bp->addr, &valid);
                             bool b = false;
                             switch (bp->cond) {
                                 case UI_DBG_BREAKCOND_EQUAL:            b = val == bp->val; break;
@@ -535,7 +540,6 @@ static int _ui_dbg_eval_op_breakpoints(ui_dbg_t* win, int trap_id, uint16_t pc) 
 //  evaluate per-tick breakpoints, only call this if is dbg.step_mode is UI_DBG_STEPMODE_NONE!
 static int _ui_dbg_eval_tick_breakpoints(ui_dbg_t* win, int trap_id, uint64_t pins) {
     game_t* game = (game_t*)win->user_data;
-    uint64_t rising_pins = pins & (pins ^ win->dbg.last_tick_pins);
     for (int i = 0; (i < win->dbg.num_breakpoints) && (trap_id == 0); i++) {
         const ui_dbg_breakpoint_t* bp = &win->dbg.breakpoints[i];
         if (bp->enabled) {
@@ -566,40 +570,6 @@ static bool _ui_dbg_bp_add_exec(ui_dbg_t* win, bool enabled, uint16_t addr) {
         bp->cond = UI_DBG_BREAKCOND_EQUAL;
         bp->addr = addr;
         bp->val = 0;
-        bp->enabled = enabled;
-        return true;
-    }
-    else {
-        /* no more breakpoint slots */
-        return false;
-    }
-}
-
-/* add a memory breakpoint (bytes) */
-static bool _ui_dbg_bp_add_byte(ui_dbg_t* win, bool enabled, uint16_t addr) {
-    if (win->dbg.num_breakpoints < UI_DBG_MAX_BREAKPOINTS) {
-        ui_dbg_breakpoint_t* bp = &win->dbg.breakpoints[win->dbg.num_breakpoints++];
-        bp->type = UI_DBG_BREAKTYPE_BYTE;
-        bp->cond = UI_DBG_BREAKCOND_EQUAL;
-        bp->addr = addr;
-        bp->val = _ui_dbg_read_byte(win, addr);
-        bp->enabled = enabled;
-        return true;
-    }
-    else {
-        /* no more breakpoint slots */
-        return false;
-    }
-}
-
-/* add a memory breakpoint (word) */
-static bool _ui_dbg_bp_add_word(ui_dbg_t* win, bool enabled, uint16_t addr) {
-    if (win->dbg.num_breakpoints < UI_DBG_MAX_BREAKPOINTS) {
-        ui_dbg_breakpoint_t* bp = &win->dbg.breakpoints[win->dbg.num_breakpoints++];
-        bp->type = UI_DBG_BREAKTYPE_WORD;
-        bp->cond = UI_DBG_BREAKCOND_EQUAL;
-        bp->addr = addr;
-        bp->val = _ui_dbg_read_word(win, addr);
         bp->enabled = enabled;
         return true;
     }
@@ -756,10 +726,11 @@ static void _ui_dbg_bp_draw(ui_dbg_t* win) {
                     /* if breakpoint type or address has changed, update the breakpoint's value from memory */
                     switch (bp->type) {
                         case UI_DBG_BREAKTYPE_BYTE:
-                            bp->val = (int) _ui_dbg_read_byte(win, bp->addr);
+                            bool valid;
+                            bp->val = (int) _ui_dbg_read_byte(win, bp->addr, &valid);
                             break;
                         case UI_DBG_BREAKTYPE_WORD:
-                            bp->val = (int) _ui_dbg_read_word(win, bp->addr);
+                            bp->val = (int) _ui_dbg_read_word(win, bp->addr, &valid);
                             break;
                         default:
                             bp->val = 0;
@@ -839,16 +810,6 @@ static void _ui_dbg_heatmap_discard(ui_dbg_t* win) {
     win->destroy_texture_cb(win->heatmap.texture);
 }
 
-static void _ui_dbg_heatmap_update_texture_size(ui_dbg_t* win, int new_width) {
-    GAME_ASSERT(((1<<16) % new_width) == 0);
-    if (new_width != win->heatmap.tex_width) {
-        win->heatmap.tex_width = new_width;
-        win->heatmap.tex_height = (1<<16) / new_width;
-        win->destroy_texture_cb(win->heatmap.texture);
-        win->heatmap.texture = win->create_texture_cb(win->heatmap.tex_width, win->heatmap.tex_height);
-    }
-}
-
 static void _ui_dbg_heatmap_reset(ui_dbg_t* win) {
     win->heatmap.popup_addr_valid = false;
     win->heatmap.popup_addr = 0;
@@ -857,17 +818,6 @@ static void _ui_dbg_heatmap_reset(ui_dbg_t* win) {
 
 static void _ui_dbg_heatmap_reboot(ui_dbg_t* win) {
     _ui_dbg_heatmap_reset(win);
-}
-
-static void _ui_dbg_heatmap_clear_all(ui_dbg_t* win) {
-    memset(win->heatmap.items, 0, sizeof(win->heatmap.items));
-}
-
-static void _ui_dbg_heatmap_clear_rw(ui_dbg_t* win) {
-    for (int i = 0; i < (1<<16); i++) {
-        win->heatmap.items[i].read_count = 0;
-        win->heatmap.items[i].write_count = 0;
-    }
 }
 
 static void _ui_dbg_heatmap_record_op(ui_dbg_t* win, uint16_t pc) {
@@ -880,49 +830,6 @@ static void _ui_dbg_heatmap_record_op(ui_dbg_t* win, uint16_t pc) {
     }
     // update last instruction's ticks
     win->heatmap.items[win->dbg.cur_op_pc].ticks = win->dbg.cur_op_ticks;
-}
-
-static void _ui_dbg_heatmap_record_tick(ui_dbg_t* win, uint64_t pins) {
-
-}
-
-static void _ui_dbg_heatmap_update(ui_dbg_t* win) {
-    const int frame_chunk_height = 64;
-    int y0 = win->heatmap.cur_y;
-    int y1 = win->heatmap.cur_y + frame_chunk_height;
-    win->heatmap.cur_y = (y0 + frame_chunk_height) & 255;
-    for (int y = y0; y < y1; y++) {
-        for (int x = 0; x < 256; x++) {
-            int i = y * 256 + x;
-            uint32_t p = 0;
-            if (_ui_dbg_get_pc(win) == i) {
-                p |= 0xFF00FFFF;
-            }
-            if (win->heatmap.show_ops && (win->heatmap.items[i].op_count > 0)) {
-                uint32_t r = 0x80 + (win->heatmap.items[i].op_count>>8);
-                if (r > 0xFF) { r = 0xFF; }
-                p |= 0xFF000000 | r;
-            }
-            if (win->heatmap.show_ops && (win->heatmap.items[i].op_start != 0)) {
-                /* opcode followup byte */
-                uint32_t r = 0x80 + (win->heatmap.items[win->heatmap.items[i].op_start].op_count>>8);
-                if (r > 0xFF) { r = 0xFF; }
-                p |= 0xFF000000 | r;
-            }
-            if (win->heatmap.show_writes && (win->heatmap.items[i].write_count > 0)) {
-                uint32_t g = 0x80 + (win->heatmap.items[i].write_count>>8);
-                if (g > 0xFF) { g = 0xFF; }
-                p |= 0xFF000000 | (g<<8);
-            }
-            if (win->heatmap.show_reads && (win->heatmap.items[i].read_count > 0)) {
-                uint32_t b = 0x80 + (win->heatmap.items[i].read_count>>8);
-                if (b > 0xFF) { b = 0xFF; }
-                p |= 0xFF000000 | (b<<16);
-            }
-            win->heatmap.pixels[i] = p;
-        }
-    }
-    win->update_texture_cb(win->heatmap.texture, win->heatmap.pixels, 256*256*4);
 }
 
 /*== UI HELPERS ==============================================================*/
@@ -1103,6 +1010,7 @@ static void _ui_dbg_update_line_array(ui_dbg_t* win, uint16_t addr) {
     */
     uint16_t bt_addr = addr;
     int i;
+    bool valid;
     for (i = 0; i < UI_DBG_NUM_BACKTRACE_LINES; i++) {
         bt_addr -= 1;
         if (win->heatmap.items[bt_addr].op_start) {
@@ -1110,7 +1018,7 @@ static void _ui_dbg_update_line_array(ui_dbg_t* win, uint16_t addr) {
         }
         int bt_index = UI_DBG_NUM_BACKTRACE_LINES - i - 1;
         win->ui.line_array[bt_index].addr = bt_addr;
-        win->ui.line_array[bt_index].val = _ui_dbg_read_byte(win, bt_addr);
+        win->ui.line_array[bt_index].val = _ui_dbg_read_byte(win, bt_addr, &valid);
     }
     for (; i < UI_DBG_NUM_LINES; i++) {
         win->ui.line_array[i].addr = addr;
@@ -1149,8 +1057,9 @@ static bool _ui_dbg_line_array_needs_update(ui_dbg_t* win, uint16_t addr) {
         return true;
     }
     /* if address is inside, check if the memory content is still the same */
+    bool valid;
     for (int i = 0; i < UI_DBG_NUM_LINES; i++) {
-        if (win->ui.line_array[i].val != _ui_dbg_read_byte(win, win->ui.line_array[i].addr)) {
+        if (win->ui.line_array[i].val != _ui_dbg_read_byte(win, win->ui.line_array[i].addr, &valid)) {
             return true;
         }
     }
@@ -1293,7 +1202,9 @@ static void _ui_dbg_draw_main(ui_dbg_t* win) {
                     val = win->dasm.bin_buf[n];
                 }
                 else {
-                    val = _ui_dbg_read_byte(win, start_addr+n);
+                    bool valid;
+                    val = _ui_dbg_read_byte(win, start_addr+n, &valid);
+                    if(!valid) break;
                 }
                 ImGui::Text("%02X ", val);
             }
@@ -1391,7 +1302,6 @@ void ui_dbg_tick(ui_dbg_t* win, uint64_t pins) {
     if (win->dbg.step_mode == UI_DBG_STEPMODE_NONE) {
         trap_id = _ui_dbg_eval_tick_breakpoints(win, trap_id, pins);
     }
-    _ui_dbg_heatmap_record_tick(win, pins);
     win->dbg.cur_op_ticks++;
     win->dbg.last_tick_pins = pins;
 

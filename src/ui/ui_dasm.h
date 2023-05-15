@@ -53,13 +53,13 @@ extern "C" {
 #endif
 
 /* callback for reading a byte from memory */
-typedef uint8_t (*ui_dasm_read_t)(int layer, uint16_t addr, void* user_data);
+typedef uint8_t (*ui_dasm_read_t)(int layer, uint16_t addr, bool* valid, void* user_data);
 
 #define UI_DASM_MAX_LAYERS (16)
 #define UI_DASM_MAX_STRLEN (32)
 #define UI_DASM_MAX_BINLEN (16)
-#define UI_DASM_NUM_LINES (512)
-#define UI_DASM_MAX_STACK (128)
+#define UI_DASM_NUM_LINES  (4096)
+#define UI_DASM_MAX_STACK  (128)
 
 /* setup parameters for ui_dasm_init()
 
@@ -154,7 +154,9 @@ void ui_dasm_discard(ui_dasm_t* win) {
 /* disassembler callback to fetch the next instruction byte */
 static uint8_t _ui_dasm_in_cb(void* user_data) {
     ui_dasm_t* win = (ui_dasm_t*) user_data;
-    uint8_t val = win->read_cb(win->cur_layer, win->cur_addr++, win->user_data);
+    bool valid;
+    uint8_t val = win->read_cb(win->cur_layer, win->cur_addr++, &valid, win->user_data);
+    if (!valid) return 0;
     if (win->bin_pos < UI_DASM_MAX_BINLEN) {
         win->bin_buf[win->bin_pos++] = val;
     }
@@ -178,6 +180,7 @@ static void _ui_dasm_disasm(ui_dasm_t* win) {
 }
 
 static bool _ui_dasm_jumptarget(ui_dasm_t* win, uint16_t pc, uint16_t* out_addr) {
+    (void)pc;
     switch (win->bin_buf[0]) {
         case 0x04: // jsr
         case 0x07: // jmp
@@ -274,6 +277,7 @@ static void _ui_dasm_draw_disasm(ui_dasm_t* win) {
         const uint16_t op_addr = win->cur_addr;
         _ui_dasm_disasm(win);
         const int num_bytes = win->bin_pos;
+        if(!num_bytes) break;
 
         /* highlight current hovered address */
         bool highlight = false;
