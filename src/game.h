@@ -3278,11 +3278,13 @@ static bool _game_vm_run(game_t* game) {
         }
     }
 
-    i = (i + 1) % GAME_NUM_TASKS;
     bool result = false;
 
     do {
+        // go to next active thread
+        i = (i + 1) % GAME_NUM_TASKS;
         if (i == 0) {
+            result = true;
             _game_vm_setup_tasks(game);
             _game_vm_update_input(game);
         }
@@ -3292,10 +3294,6 @@ static bool _game_vm_run(game_t* game) {
             game->vm.current_task = i;
             break;
         }
-        
-        // go to next active thread
-        i = (i + 1) % GAME_NUM_TASKS;
-        result |= (i == 0);
     } while(true);
 
     return result;
