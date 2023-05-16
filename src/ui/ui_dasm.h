@@ -193,9 +193,9 @@ static bool _ui_dasm_jumptarget(ui_dasm_t* win, uint16_t pc, uint16_t* out_addr)
             *out_addr = win->bin_buf[3] | win->bin_buf[2]  << 8;
             return true;
         case 0x0a: // if exp
-            uint8_t op = win->bin_buf[2];
-            uint8_t off = (op & 0x40) ? 2: 1;
-            *out_addr = win->bin_buf[3+off] | win->bin_buf[2+off] << 8;
+            const uint8_t op = win->bin_buf[1];
+            const uint8_t off = (op & 0x40) ? 5 : 4;
+            *out_addr = win->bin_buf[off+1] | win->bin_buf[off] << 8;
             return true;
     }
     return false;
@@ -308,7 +308,7 @@ static void _ui_dasm_draw_disasm(ui_dasm_t* win) {
         /* check for jump instruction and draw an arrow  */
         uint16_t jump_addr = 0;
         if (_ui_dasm_jumptarget(win, win->cur_addr, &jump_addr)) {
-            ImGui::SameLine(line_start_x + cell_width*6 + glyph_width*2 + glyph_width*20);
+            ImGui::SameLine(line_start_x + cell_width*8 + glyph_width*2 + glyph_width*20);
             ImGui::PushID(line_i);
             if (ImGui::ArrowButton("##btn", ImGuiDir_Right)) {
                 ImGui::SetScrollY(0);

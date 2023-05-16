@@ -141,13 +141,13 @@ uint16_t raw_dasm_op(uint16_t pc, raw_dasm_input_t in_cb, raw_dasm_output_t out_
         case 0x00: _FETCH_U8(u8); _STR("set v"); _STR_U8(u8); _CHR(' '); _FETCH_I16(i16); _STR_U16(i16); break; // mov const
         case 0x01: _FETCH_U8(u8); _STR("seti v"); _STR_U8(u8); _STR(" v"); _FETCH_U8(u8); _STR_U8(u8); break; // mov
         case 0x02: _FETCH_U8(u8); _STR("addi "); _STR_U8(u8); _STR(" v"); _FETCH_U8(u8); _STR_U8(u8); break; // add
-        case 0x03: _FETCH_U8(u8); _STR("addi "); _STR_U8(u8); _CHR(' '); _FETCH_I16(i16); _STR_U16(i16); break; // add const
+        case 0x03: _FETCH_U8(u8); _STR("addi v"); _STR_U8(u8); _CHR(' '); _FETCH_I16(i16); _STR_U16(i16); break; // add const
         case 0x04: _FETCH_U16(u16); _STR("jsr "); _STR_U16(u16); break; // call
         case 0x05: _STR("return"); break; // ret
         case 0x06: _STR("break"); break; // yield task
         case 0x07: _FETCH_U16(u16); _STR("jmp "); _STR_U16(u16); break; // jmp
         case 0x08: _FETCH_U8(u8); _STR("setvec "); _STR_U8(u8); _CHR(' '); _FETCH_U16(u16); _STR_U16(u16); break; // install task
-        case 0x09: _FETCH_U8(u8); _STR("if v"); _STR_U8(u8); _CHR(' '); _FETCH_U16(u16); _STR_U16(u16);  break; // jmpIfVar
+        case 0x09: _FETCH_U8(u8); _STR("dbra v"); _STR_U8(u8); _CHR(' '); _FETCH_U16(u16); _STR_U16(u16);  break; // jmpIfVar
         case 0x0a: {
             uint8_t op, v;
             _FETCH_U8(op); _FETCH_U8(v);
@@ -173,7 +173,7 @@ uint16_t raw_dasm_op(uint16_t pc, raw_dasm_input_t in_cb, raw_dasm_output_t out_
              _STR(") jmp ");
             _FETCH_I16(i16); _STR_U16(i16);
         } break;
-        case 0x0b: _FETCH_U16(u16); _STR("fade "); _STR_U16(u16);  break; // setPalette
+        case 0x0b: _FETCH_U16(u16); _STR("fade "); _STR_U8(u16>>8);  break; // setPalette
         case 0x0c: _FETCH_U8(u8); _STR("vec "); _STR_U8(u8); _CHR(','); _FETCH_U8(u8); _STR_U8(u8); _CHR(','); _FETCH_U8(u8); _STR_U8(u8); break; // changeTasksState
         case 0x0d: _FETCH_U8(u8); _STR("setws "); _STR_U8(u8); break; // selectPage
         case 0x0e: _FETCH_U8(u8); _STR("clr "); _STR_U8(u8); _FETCH_U8(u8); _CHR(' '); _STR_U8(u8); break; // fillPage
@@ -193,10 +193,15 @@ uint16_t raw_dasm_op(uint16_t pc, raw_dasm_input_t in_cb, raw_dasm_output_t out_
             if(op & 0x80) {
                 uint8_t x, y;
                 _FETCH_U8(u8); _FETCH_U8(x); _FETCH_U8(y);
-                _STR("spr ");  _STR_U8(x); _CHR(' '); _STR_U8(x); _STR(" "); _STR_U8(y); _CHR(' ');
+                const uint16_t off = ((op << 8) | u8) << 1;
+                _STR("spr ");  _STR_U16(off); _CHR(' '); _STR_U8(x); _STR(" "); _STR_U8(y); _CHR(' ');
             } else if(op & 0x40) {
-                _FETCH_U8(u8); _FETCH_U8(u8);
+                uint8_t offset_hi;
+                _FETCH_U8(offset_hi); _FETCH_U8(u8);
+                const uint16_t off = ((offset_hi << 8) | u8) << 1;
                 _STR("spr ");
+                _STR_U16(off);
+                _CHR(' ');
                 if (!(op & 0x20)) {
                     if (!(op & 0x10)) {
                         int16_t x;
