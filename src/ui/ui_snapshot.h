@@ -128,7 +128,7 @@ static bool ui_snapshot_draw_menu_slot(const char* sel_id, ui_snapshot_screensho
 void ui_snapshot_menus(ui_snapshot_t* state) {
     GAME_ASSERT(state);
     if (ImGui::BeginMenu("Save Snapshot")) {
-        for (size_t slot_index = 0; slot_index < UI_SNAPSHOT_MAX_SLOTS; slot_index++) {
+        for (int slot_index = 0; slot_index < UI_SNAPSHOT_MAX_SLOTS; slot_index++) {
             const ui_snapshot_screenshot_t screenshot = state->slots[slot_index].screenshot;
             ImGui::PushID(slot_index);
             if (screenshot.texture) {
@@ -151,7 +151,7 @@ void ui_snapshot_menus(ui_snapshot_t* state) {
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("Load Snapshot")) {
-        for (size_t slot_index = 0; slot_index < UI_SNAPSHOT_MAX_SLOTS; slot_index++) {
+        for (int slot_index = 0; slot_index < UI_SNAPSHOT_MAX_SLOTS; slot_index++) {
             if (state->slots[slot_index].valid) {
                 const ui_snapshot_screenshot_t screenshot = state->slots[slot_index].screenshot;
                 ImGui::PushID(slot_index);

@@ -86,6 +86,11 @@ typedef struct {
             int pos[2], zoom;
             int pal_idx;
         } poly;
+        struct {
+            ui_dasm_t dasm;
+            uint8_t buf[65536];
+            uint16_t size;
+        } code;
     } data;
 } ui_game_res_t;
 
@@ -616,6 +621,7 @@ static void _ui_game_get_palette(uint8_t* buf, int pal_idx, ImColor* pal) {
 
 static void _ui_game_draw_sel_res(ui_game_t* ui) {
     game_mem_entry_t* e = &ui->game->res.mem_list[ui->res.selected];
+    ui->res.data.code.dasm.open = (e->type == RT_BYTECODE);
     if(e->type == RT_PALETTE) {
         game_get_res_buf(ui->game, ui->res.selected, ui->res.data.pal.buf);
         // display 32 palettes
@@ -693,6 +699,9 @@ static void _ui_game_draw_sel_res(ui_game_t* ui) {
             ImGui::SliderInt2("pos", &ui->res.data.poly.pos[0], -480, 480);
             ImGui::SliderInt("zoom", &ui->res.data.poly.zoom, 1, 320);
         }
+    } else if(e->type == RT_BYTECODE) {
+        game_get_res_buf(ui->game, ui->res.selected, ui->res.data.code.buf);
+        ui->res.data.code.size = e->unpacked_size;
     } else {
         ImGui::Text("No preview");
     }
@@ -815,6 +824,19 @@ static uint8_t _ui_raw_mem_read(int layer, uint16_t addr, bool* valid, void* use
     return 0;
 }
 
+static uint8_t _ui_raw_dasm_read(int layer, uint16_t addr, bool* valid, void* user_data) {
+    GAME_ASSERT(user_data);
+    (void)layer;
+    ui_game_t* ui = (ui_game_t*) user_data;
+    uint8_t* pc = ui->res.data.code.buf;
+    *valid = false;
+    if (pc != NULL && addr >= 0 && addr < ui->res.data.code.size) {
+        *valid = true;
+        return pc[addr];
+    }
+    return 0;
+}
+
 void ui_game_init(ui_game_t* ui, const ui_game_desc_t* ui_desc) {
     GAME_ASSERT(ui && ui_desc);
     GAME_ASSERT(ui_desc->game);
@@ -843,6 +865,15 @@ void ui_game_init(ui_game_t* ui, const ui_game_desc_t* ui_desc) {
             ui_dasm_init(&ui->dasm[i], &desc);
             x += dx; y += dy;
         }
+    }
+    {
+        ui_dasm_desc_t desc = {0};
+        desc.layers[0] = "System";
+        desc.read_cb = _ui_raw_dasm_read;
+        desc.user_data = ui;
+        desc.title = "Disassembler"; desc.x = x; desc.y = y;
+        ui_dasm_init(&ui->res.data.code.dasm, &desc);
+        x += dx; y += dy;
     }
     {
         ui->video.texture_cbs = ui_desc->dbg_texture;
@@ -883,6 +914,7 @@ void ui_game_discard(ui_game_t* ui) {
     for (int i = 0; i < 4; i++) {
         ui_dasm_discard(&ui->dasm[i]);
     }
+    ui_dasm_discard(&ui->res.data.code.dasm);
     ui_dbg_discard(&ui->dbg);
     ui->game = 0;
 }
@@ -896,6 +928,7 @@ void ui_game_draw(ui_game_t* ui) {
     for (int i = 0; i < 4; i++) {
         ui_dasm_draw(&ui->dasm[i]);
     }
+    ui_dasm_draw(&ui->res.data.code.dasm);
     ui_dbg_draw(&ui->dbg);
 }
 

@@ -420,6 +420,14 @@ typedef struct {
 	_game_point_t vertices[GAME_QUAD_STRIP_MAX_VERTICES];
 } _game_quad_strip_t;
 
+typedef struct {
+    int size;
+    uint32_t crc;
+    uint32_t bits;
+    uint8_t *dst;
+    const uint8_t *src;
+} _unpack_context_t;
+
 typedef void (*_gfx_draw_line_t)(game_t* game, int16_t x1, int16_t x2, int16_t y, uint8_t col);
 
 static const uint8_t _font[] = {
@@ -492,7 +500,7 @@ static const uint16_t _period_table[] = {
 };
 
 // from https://en.wikipedia.org/wiki/Enhanced_Graphics_Adapter
-const uint8_t _palette_ega[] = {
+static const uint8_t _palette_ega[] = {
         0x00, 0x00, 0x00, // black #0
         0x00, 0x00, 0xAA, // blue #1
         0x00, 0xAA, 0x00, // green #2
@@ -655,7 +663,7 @@ static const game_str_entry_t _strings_table_fr[] = {
 	{ 0xFFFF, 0 }
 };
 
-const game_str_entry_t _strings_table_eng[] = {
+static const game_str_entry_t _strings_table_eng[] = {
 	{ 0x001, "P E A N U T  3000" },
 	{ 0x002, "Copyright  } 1990 Peanut Computer, Inc.\nAll rights reserved.\n\nCDOS Version 5.01" },
 	{ 0x003, "2" },
@@ -799,7 +807,7 @@ const game_str_entry_t _strings_table_eng[] = {
 	{ 0xFFFF, 0 }
 };
 
-const game_str_entry_t _strings_table_demo[] = {
+static const game_str_entry_t _strings_table_demo[] = {
 	{ 0x1F4, "Over Two Years in the Making" },
 	{ 0x1F5, "   A New, State\nof the Art, Polygon\n  Graphics System" },
 	{ 0x1F6, "   Comes to the\nComputer With Full\n Screen Graphics" },
@@ -810,7 +818,7 @@ const game_str_entry_t _strings_table_demo[] = {
 	{ 0xFFFF, 0 }
 };
 
-const uint8_t _mem_list_parts[][4] = {
+static const uint8_t _mem_list_parts[][4] = {
 	{ 0x14, 0x15, 0x16, 0x00 }, // 16000 - protection screens
 	{ 0x17, 0x18, 0x19, 0x00 }, // 16001 - introduction
 	{ 0x1A, 0x1B, 0x1C, 0x11 }, // 16002 - water
@@ -831,7 +839,7 @@ typedef struct {
 	uint32_t unpacked_size;
 } amiga_mem_entry_t;
 
-const amiga_mem_entry_t _mem_list_amiga_fr[146] = {
+static const amiga_mem_entry_t _mem_list_amiga_fr[146] = {
 	{ 0, 0x1, 0x000000, 0x0000, 0x0000 },
 	{ 0, 0x1, 0x000000, 0x1A3C, 0x1A3C },
 	{ 0, 0x1, 0x001A3C, 0x2E34, 0x2E34 },
@@ -2328,15 +2336,7 @@ static void _game_res_invalidate(game_t* game) {
 	game->video.current_pal = 0xFF;
 }
 
-typedef struct {
-	int size;
-	uint32_t crc;
-	uint32_t bits;
-	uint8_t *dst;
-	const uint8_t *src;
-} UnpackCtx;
-
-static bool _nextBit(UnpackCtx *uc) {
+static bool _next_bit(_unpack_context_t *uc) {
 	bool carry = (uc->bits & 1) != 0;
 	uc->bits >>= 1;
 	if (uc->bits == 0) { // getnextlwd
@@ -2348,49 +2348,49 @@ static bool _nextBit(UnpackCtx *uc) {
 	return carry;
 }
 
-static int _getBits(UnpackCtx *uc, int count) { // rdd1bits
+static int _get_bits(_unpack_context_t *uc, int count) { // rdd1bits
 	int bits = 0;
 	for (int i = 0; i < count; ++i) {
 		bits <<= 1;
-		if (_nextBit(uc)) {
+		if (_next_bit(uc)) {
 			bits |= 1;
 		}
 	}
 	return bits;
 }
 
-static void _copyLiteral(UnpackCtx *uc, int bitsCount, int len) { // getd3chr
-	int count = _getBits(uc, bitsCount) + len + 1;
+static void _copy_literal(_unpack_context_t *uc, int bits_count, int len) { // getd3chr
+	int count = _get_bits(uc, bits_count) + len + 1;
 	uc->size -= count;
 	if (uc->size < 0) {
 		count += uc->size;
 		uc->size = 0;
 	}
 	for (int i = 0; i < count; ++i) {
-		*(uc->dst - i) = (uint8_t)_getBits(uc, 8);
+		*(uc->dst - i) = (uint8_t)_get_bits(uc, 8);
 	}
 	uc->dst -= count;
 }
 
-static void _copyReference(UnpackCtx *uc, int bitsCount, int count) { // copyd3bytes
+static void _copy_reference(_unpack_context_t *uc, int bits_count, int count) { // copyd3bytes
 	uc->size -= count;
 	if (uc->size < 0) {
 		count += uc->size;
 		uc->size = 0;
 	}
-	const int offset = _getBits(uc, bitsCount);
+	const int offset = _get_bits(uc, bits_count);
 	for (int i = 0; i < count; ++i) {
 		*(uc->dst - i) = *(uc->dst - i + offset);
 	}
 	uc->dst -= count;
 }
 
-static bool _bytekiller_unpack(uint8_t *dst, int dstSize, const uint8_t *src, int srcSize) {
-	UnpackCtx uc;
-	uc.src = src + srcSize - 4;
+static bool _byte_killer_unpack(uint8_t *dst, int dst_size, const uint8_t *src, int src_size) {
+	_unpack_context_t uc;
+	uc.src = src + src_size - 4;
 	uc.size = _read_be_uint32(uc.src); uc.src -= 4;
-	if (uc.size > dstSize) {
-		_warning("Unexpected unpack size %d, buffer size %d", uc.size, dstSize);
+	if (uc.size > dst_size) {
+		_warning("Unexpected unpack size %d, buffer size %d", uc.size, dst_size);
 		return false;
 	}
 	uc.dst = dst + uc.size - 1;
@@ -2398,26 +2398,26 @@ static bool _bytekiller_unpack(uint8_t *dst, int dstSize, const uint8_t *src, in
 	uc.bits = _read_be_uint32(uc.src); uc.src -= 4;
 	uc.crc ^= uc.bits;
 	do {
-		if (!_nextBit(&uc)) {
-			if (!_nextBit(&uc)) {
-				_copyLiteral(&uc, 3, 0);
+		if (!_next_bit(&uc)) {
+			if (!_next_bit(&uc)) {
+				_copy_literal(&uc, 3, 0);
 			} else {
-				_copyReference(&uc, 8, 2);
+				_copy_reference(&uc, 8, 2);
 			}
 		} else {
-			const int code = _getBits(&uc, 2);
+			const int code = _get_bits(&uc, 2);
 			switch (code) {
 			case 3:
-				_copyLiteral(&uc, 8, 8);
+				_copy_literal(&uc, 8, 8);
 				break;
 			case 2:
-				_copyReference(&uc, 12, _getBits(&uc, 8) + 1);
+				_copy_reference(&uc, 12, _get_bits(&uc, 8) + 1);
 				break;
 			case 1:
-				_copyReference(&uc, 10, 4);
+				_copy_reference(&uc, 10, 4);
 				break;
 			case 0:
-				_copyReference(&uc, 9, 3);
+				_copy_reference(&uc, 9, 3);
 				break;
 			}
 		}
@@ -2433,7 +2433,7 @@ static bool _game_res_read_bank(game_t* game, const game_mem_entry_t *me, uint8_
 
     memcpy(dstBuf, (uint8_t*)game->res.data.banks[me->bank_num-1].ptr + me->bank_pos, me->packed_size);
     if (me->packed_size != me->unpacked_size) {
-        return _bytekiller_unpack(dstBuf, me->unpacked_size, dstBuf, me->packed_size);
+        return _byte_killer_unpack(dstBuf, me->unpacked_size, dstBuf, me->packed_size);
     }
 
     return true;

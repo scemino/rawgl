@@ -21,7 +21,7 @@
 #include "fs.h"
 #if defined(GAME_USE_UI)
     #include "ui.h"
-    #include "ui/raw-dasm.h"
+    #include "ui/raw_dasm.h"
     #include "ui/ui_dasm.h"
     #include "ui/ui_dbg.h"
     #include "ui/ui_snapshot.h"
