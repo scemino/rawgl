@@ -573,7 +573,8 @@ static uint8_t* _game_video_draw_shape_parts(ui_game_t* ui, uint8_t* p, uint16_t
     int16_t n = *p++;
     for ( ; n >= 0; --n) {
         uint16_t offset = (p[0] << 8) | p[1]; p += 2;
-        _game_point_t po = {.x = pt.x, .y = pt.y};
+        _game_point_t po;
+        po.x = pt.x; po.y = pt.y;
         po.x += *p++ * zoom / 64;
         po.y += *p++ * zoom / 64;
         uint16_t color = 0xFF;
@@ -680,7 +681,8 @@ static void _ui_game_draw_sel_res(ui_game_t* ui) {
         }
         // draw selected polygon(s)
         if(ui->res.data.poly.offset != 0xffff) {
-            _game_point_t pt {.x = (int16_t)ui->res.data.poly.pos[0], .y = (int16_t)ui->res.data.poly.pos[1]};
+            _game_point_t pt;
+            pt.x = (int16_t)ui->res.data.poly.pos[0]; pt.y = (int16_t)ui->res.data.poly.pos[1];
             memset(ui->res.data.poly.img, 0, GAME_WIDTH*GAME_HEIGHT);
             _game_video_draw_shape(ui, ui->res.data.poly.buf + ui->res.data.poly.offset, 0xff, ui->res.data.poly.zoom, &pt);
             ImColor pal[16];
