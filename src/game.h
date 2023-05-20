@@ -3010,7 +3010,7 @@ static void _op_playMusic(game_t* game) {
 	_snd_playMusic(game, resNum, delay, pos);
 }
 
-static const _opcode_func _opTable[] = {
+static const _opcode_func _op_table[] = {
 	/* 0x00 */
 	&_op_mov_const,
 	&_op_mov,
@@ -3255,7 +3255,7 @@ static void _game_vm_execute_task(game_t* game) {
         if (opcode > 0x1A) {
             error("Script::executeTask() ec=0x%X invalid opcode=0x%X", 0xFFF, opcode);
         } else {
-            (*_opTable[opcode])(game);
+            (*_op_table[opcode])(game);
         }
     }
 }

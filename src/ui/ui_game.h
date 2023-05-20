@@ -43,6 +43,8 @@
 extern "C" {
 #endif
 
+#define UI_RES_MAX_POLY_OFFSETS (2769)
+
 typedef struct {
     int x, y;
     int w, h;
@@ -52,19 +54,39 @@ typedef struct {
     uint32_t pixel_buffer[GAME_WIDTH*GAME_HEIGHT];
 } ui_game_video_t;
 
+
+typedef struct {
+    uint16_t offsets[UI_RES_MAX_POLY_OFFSETS];
+    uint16_t num_offset;
+} ui_res_poly_info_t;
+
 typedef struct {
     int x, y;
     int w, h;
     bool open;
     void* tex_bmp;
-    uint8_t buf[GAME_WIDTH*GAME_HEIGHT*4];
+    void* tex_fb;
     int selected;
+    bool filters[7]; // filter each resource types
     struct {
-        int pal_idx;
-        int pal_res_idx;
-        bool pal_ovw;
+        struct {
+            uint8_t buf[GAME_WIDTH*GAME_HEIGHT*4];
+        } bmp;
+        struct {
+            uint8_t buf[2048];
+            int idx;
+            int res_idx;
+            bool ovw;
+        } pal;
+        struct {
+            ui_res_poly_info_t info;
+            uint8_t buf[65536];
+            uint8_t img[GAME_WIDTH*GAME_HEIGHT];
+            uint16_t offset;
+            int pos[2], zoom;
+            int pal_idx;
+        } poly;
     } data;
-    bool filters[7];
 } ui_game_res_t;
 
 typedef struct {
@@ -114,6 +136,19 @@ game_debug_t ui_game_get_debug(ui_game_t* ui);
 #pragma clang diagnostic ignored "-Wmissing-field-initializers"
 #endif
 
+#define _MIN(v1, v2) ((v1 < v2) ? v1 : v2)
+
+#define _GAME_QUAD_STRIP_MAX_VERTICES    (70)
+
+typedef struct {
+	int16_t x, y;
+} _game_point_t;
+
+typedef struct {
+	uint8_t num_vertices;
+	_game_point_t vertices[_GAME_QUAD_STRIP_MAX_VERTICES];
+} _game_quad_strip_t;
+
 static void _ui_game_draw_menu(ui_game_t* ui) {
     GAME_ASSERT(ui && ui->game);
     if (ImGui::BeginMainMenuBar()) {
@@ -155,7 +190,7 @@ static void _ui_game_update_fbs(ui_game_t* ui) {
 }
 
 static void _ui_game_draw_vm(ui_game_t* ui) {
-     if (!ui->vm.open) {
+    if (!ui->vm.open) {
         return;
     }
     ImGui::SetNextWindowPos(ImVec2((float)ui->vm.x, (float)ui->vm.y), ImGuiCond_Once);
@@ -281,8 +316,8 @@ static void decode_amiga(const uint8_t *src, uint32_t *dst, uint32_t pal[16]) {
 }
 
 static void _ui_game_get_pal(ui_game_t* ui, int res_id, int id, uint32_t pal[16]) {
-    game_get_res_buf(ui->game, res_id, ui->res.buf);
-    const uint8_t *p = ui->res.buf + id * 16 * sizeof(uint16_t);
+    game_get_res_buf(ui->game, res_id, ui->res.data.pal.buf);
+    const uint8_t *p = ui->res.data.pal.buf + id * 16 * sizeof(uint16_t);
     for (int i = 0; i < 16; ++i) {
         const uint16_t color = _read_be_uint16(p); p += 2;
         uint8_t r = (color >> 8) & 0xF;
@@ -297,7 +332,7 @@ static void _ui_game_get_pal(ui_game_t* ui, int res_id, int id, uint32_t pal[16]
 }
 
 static void _ui_game_get_pal_for_res(ui_game_t* ui, int res_id, uint32_t pal[16]) {
-    static uint8_t _res[] = {
+    static const uint8_t _res[] = {
         0x12, 0, 4,
         0x13, 0, 10,
         0x43, 4, 6,
@@ -305,42 +340,294 @@ static void _ui_game_get_pal_for_res(ui_game_t* ui, int res_id, uint32_t pal[16]
         0x45, 4, 8,
         0x46, 4, 8,
         0x47, 0, 2,
-        0x48, 8, 7,
-        0x49, 8, 7,
+        0x48, 3, 25,
+        0x49, 3, 25,
         0x53, 0, 10,
         0x90, 6, 3,
         0x91, 6, 1
     };
-    static uint8_t _res_ids[] = { 0x14, 0x17, 0x1a, 0x1d, 0x20, 0x23, 0x26, 0x29, 0x7d };
+    static const uint8_t _res_ids[] = { 0x14, 0x17, 0x1a, 0x1d, 0x20, 0x23, 0x26, 0x29, 0x7d };
 
     for(int i=0; i<12; i++) {
         if(_res[i*3] == res_id) {
-            if(!ui->res.data.pal_ovw) {
-                ui->res.data.pal_idx = _res[i*3+2];
-                ui->res.data.pal_res_idx = _res[i*3+1];
+            if(!ui->res.data.pal.ovw) {
+                ui->res.data.pal.idx = _res[i*3+2];
+                ui->res.data.pal.res_idx = _res[i*3+1];
             }
-            _ui_game_get_pal(ui, _res_ids[ui->res.data.pal_res_idx], ui->res.data.pal_idx, pal);
+            _ui_game_get_pal(ui, _res_ids[ui->res.data.pal.res_idx], ui->res.data.pal.idx, pal);
         }
+    }
+}
+
+// poly offsets
+static uint8_t* _ui_game_get_polygon_offsets(uint8_t* p) {
+	p += 2;
+	uint16_t num_vertices = *p++;
+	if ((num_vertices & 1) != 0) {
+		return p;
+	}
+    p += (num_vertices * 2);
+	return p;
+}
+
+static uint8_t* _ui_game_get_shape_offsets(uint8_t* p) {
+    p += 2;
+    int16_t n = *p++;
+    for ( ; n >= 0; --n) {
+        uint16_t offset = (p[0] << 8) | p[1];
+        p += 4;
+        if (offset & 0x8000) {
+            p += 2;
+        }
+        offset <<= 1;
+    }
+    return p;
+}
+
+static void _ui_game_get_poly_offsets(uint8_t* p, uint16_t size, ui_res_poly_info_t* info) {
+    const uint8_t* p_start = p;
+    const uint8_t* p_end = p + size;
+    info->num_offset = 0;
+    do {
+        info->offsets[info->num_offset++] = p - p_start;
+        uint8_t i = *p++;
+        if (i >= 0xc0) {
+            p = _ui_game_get_polygon_offsets(p);
+        } else {
+            i &= 0x3f;
+            if (i == 2) {
+            	p = _ui_game_get_shape_offsets(p);
+            }
+        }
+        if(info->num_offset == (UI_RES_MAX_POLY_OFFSETS+1)) { assert(false); }
+    } while(p < p_end);
+}
+
+// poly drawing
+#define _GFX_COL_ALPHA      (0x10) // transparent pixel (OR'ed with 0x8)
+#define _GFX_COL_PAGE       (0x11) // buffer 0 pixel
+#define _MIN(v1, v2) ((v1 < v2) ? v1 : v2)
+#define _MAX(v1, v2) ((v1 > v2) ? v1 : v2)
+
+typedef void (*_gfx_draw_line_t)(ui_game_t* ui, int16_t x1, int16_t x2, int16_t y, uint8_t col);
+
+static uint32_t _calc_step(const _game_point_t* p1, const _game_point_t* p2, uint16_t* dy) {
+    *dy = p2->y - p1->y;
+    uint16_t delta = (*dy <= 1) ? 1 : *dy;
+    return ((p2->x - p1->x) * (0x4000 / delta)) << 2;
+}
+
+
+static void _game_gfx_draw_line_p(ui_game_t* ui, int16_t x1, int16_t x2, int16_t y, uint8_t color) {
+    // TODO ?
+    (void)ui;(void)x1;(void)x2;(void)y;(void)color;
+}
+
+static void _game_gfx_draw_line_n(ui_game_t* ui, int16_t x1, int16_t x2, int16_t y, uint8_t color) {
+    const int16_t xmax = _MAX(x1, x2);
+    const int16_t xmin = _MIN(x1, x2);
+    const int w = xmax - xmin + 1;
+    const int offset = (y * GAME_WIDTH + xmin);
+    memset(ui->res.data.poly.img + offset, color, w);
+}
+
+static void _game_gfx_draw_line_trans(ui_game_t* ui, int16_t x1, int16_t x2, int16_t y, uint8_t color) {
+    (void)color;
+    const int16_t xmax = _MAX(x1, x2);
+    const int16_t xmin = _MIN(x1, x2);
+    const int w = xmax - xmin + 1;
+    const int offset = (y * GAME_WIDTH + xmin);
+    for (int i = 0; i < w; ++i) {
+        ui->res.data.poly.img[offset + i] |= 8;
+    }
+}
+
+static void _game_gfx_draw_polygon(ui_game_t* ui, uint8_t color, const _game_quad_strip_t* quadStrip) {
+    const _game_quad_strip_t* qs = quadStrip;
+
+    int i = 0;
+    int j = qs->num_vertices - 1;
+
+    int16_t x2 = qs->vertices[i].x;
+    int16_t x1 = qs->vertices[j].x;
+    int16_t hliney = _MIN(qs->vertices[i].y, qs->vertices[j].y);
+
+    ++i;
+    --j;
+
+    _gfx_draw_line_t pdl;
+    switch (color) {
+    default:
+        pdl = &_game_gfx_draw_line_n;
+        break;
+    case _GFX_COL_PAGE:
+        pdl = &_game_gfx_draw_line_p;
+        break;
+    case _GFX_COL_ALPHA:
+        pdl = &_game_gfx_draw_line_trans;
+        break;
+    }
+
+    uint32_t cpt1 = x1 << 16;
+    uint32_t cpt2 = x2 << 16;
+
+    int numVertices = qs->num_vertices;
+    while (1) {
+        numVertices -= 2;
+        if (numVertices == 0) {
+            return;
+        }
+        uint16_t h;
+        uint32_t step1 = _calc_step(&qs->vertices[j + 1], &qs->vertices[j], &h);
+        uint32_t step2 = _calc_step(&qs->vertices[i - 1], &qs->vertices[i], &h);
+
+        ++i;
+        --j;
+
+        cpt1 = (cpt1 & 0xFFFF0000) | 0x7FFF;
+        cpt2 = (cpt2 & 0xFFFF0000) | 0x8000;
+
+        if (h == 0) {
+            cpt1 += step1;
+            cpt2 += step2;
+        } else {
+            while (h--) {
+                if (hliney >= 0) {
+                    x1 = cpt1 >> 16;
+                    x2 = cpt2 >> 16;
+                    if (x1 < GAME_WIDTH && x2 >= 0) {
+                        if (x1 < 0) x1 = 0;
+                        if (x2 >= GAME_WIDTH) x2 = GAME_WIDTH - 1;
+                        (*pdl)(ui, x1, x2, hliney, color);
+                    }
+                }
+                cpt1 += step1;
+                cpt2 += step2;
+                ++hliney;
+                if (hliney >= GAME_HEIGHT) return;
+            }
+        }
+    }
+}
+
+static void _game_gfx_draw_point(ui_game_t* ui, int16_t x, int16_t y, uint8_t color) {
+    const int offset = (y * GAME_WIDTH + x);
+    uint32_t* buf = (uint32_t*)ui->res.data.poly.img;
+    switch (color) {
+    case _GFX_COL_ALPHA:
+        buf[offset] |= 8;
+        break;
+    case _GFX_COL_PAGE:
+        buf[offset] = color;
+        break;
+    default:
+        buf[offset] = color;
+        break;
+    }
+}
+
+static uint8_t* _game_video_fill_polygon(ui_game_t* ui, uint8_t* p, uint16_t color, uint16_t zoom, const _game_point_t *pt) {
+    uint16_t bbw = (*p++) * zoom / 64;
+    uint16_t bbh = (*p++) * zoom / 64;
+
+    int16_t x1 = pt->x - bbw / 2;
+    int16_t x2 = pt->x + bbw / 2;
+    int16_t y1 = pt->y - bbh / 2;
+    int16_t y2 = pt->y + bbh / 2;
+
+    if (x1 >= GAME_WIDTH || x2 < 0 || y1 >= GAME_HEIGHT || y2 < 0)
+        return p;
+
+    _game_quad_strip_t qs;
+    qs.num_vertices = *p++;
+    if ((qs.num_vertices & 1) != 0) {
+        return p;
+    }
+    GAME_ASSERT(qs.num_vertices < GAME_QUAD_STRIP_MAX_VERTICES);
+
+    for (int i = 0; i < qs.num_vertices; ++i) {
+        _game_point_t *v = &qs.vertices[i];
+        v->x = x1 + (*p++) * zoom / 64;
+        v->y = y1 + (*p++) * zoom / 64;
+    }
+
+    if (qs.num_vertices == 4 && bbw == 0 && bbh <= 1) {
+        _game_gfx_draw_point(ui, pt->x, pt->y, color);
+    } else {
+        _game_gfx_draw_polygon(ui, color, &qs);
+    }
+    return p;
+}
+
+static void _game_video_draw_shape(ui_game_t* ui, uint8_t* p, uint8_t color, uint16_t zoom, const _game_point_t *pt);
+
+static uint8_t* _game_video_draw_shape_parts(ui_game_t* ui, uint8_t* p, uint16_t zoom, const _game_point_t *pgc) {
+    _game_point_t pt;
+    pt.x = pgc->x - *p++ * zoom / 64;
+    pt.y = pgc->y - *p++ * zoom / 64;
+    int16_t n = *p++;
+    for ( ; n >= 0; --n) {
+        uint16_t offset = (p[0] << 8) | p[1]; p += 2;
+        _game_point_t po = {.x = pt.x, .y = pt.y};
+        po.x += *p++ * zoom / 64;
+        po.y += *p++ * zoom / 64;
+        uint16_t color = 0xFF;
+        if (offset & 0x8000) {
+            color = *p++;
+            p++;
+            color &= 0x7F;
+        }
+        offset <<= 1;
+        uint8_t *bak = p;
+        _game_video_draw_shape(ui, ui->res.data.poly.buf + offset, color, zoom, &po);
+        p = bak;
+    }
+    return p;
+}
+
+static void _game_video_draw_shape(ui_game_t* ui, uint8_t* p, uint8_t color, uint16_t zoom, const _game_point_t *pt) {
+    uint8_t i = *p++;
+    if (i >= 0xC0) {
+        if (color & 0x80) {
+            color = i & 0x3F;
+        }
+        p = _game_video_fill_polygon(ui, p, color, zoom, pt);
+    } else {
+        i &= 0x3F;
+        if (i == 2) {
+            p = _game_video_draw_shape_parts(ui, p, zoom, pt);
+        }
+    }
+}
+
+static void _ui_game_get_palette(uint8_t* buf, int pal_idx, ImColor* pal) {
+    const uint8_t *p = buf + pal_idx * 16 * sizeof(uint16_t);
+    for (int i = 0; i < 16; ++i) {
+        const uint16_t color = _read_be_uint16(p); p += 2;
+        uint8_t r = (color >> 8) & 0xF;
+        uint8_t g = (color >> 4) & 0xF;
+        uint8_t b =  color       & 0xF;
+        r = (r << 4) | r;
+        g = (g << 4) | g;
+        b = (b << 4) | b;
+        pal[i] = ImColor(r, g, b);
     }
 }
 
 static void _ui_game_draw_sel_res(ui_game_t* ui) {
     game_mem_entry_t* e = &ui->game->res.mem_list[ui->res.selected];
     if(e->type == RT_PALETTE) {
-        game_get_res_buf(ui->game, ui->res.selected, ui->res.buf);
+        game_get_res_buf(ui->game, ui->res.selected, ui->res.data.pal.buf);
+        // display 32 palettes
         for (int num = 0; num < 32; ++num) {
-            const uint8_t *p = ui->res.buf + num * 16 * sizeof(uint16_t);
+            // 1 palette is 16 colors
+            ImColor pal[16];
+            _ui_game_get_palette(ui->res.data.pal.buf, num, pal);
+            ImGui::Text("%02D", num);
+            ImGui::SameLine();
             for (int i = 0; i < 16; ++i) {
-                const uint16_t color = _read_be_uint16(p); p += 2;
-                uint8_t r = (color >> 8) & 0xF;
-                uint8_t g = (color >> 4) & 0xF;
-                uint8_t b =  color       & 0xF;
-                r = (r << 4) | r;
-                g = (g << 4) | g;
-                b = (b << 4) | b;
-                ImColor c = ImColor(r, g, b);
                 ImGui::PushID(i);
-                ImGui::ColorEdit3("##pal_color", &c.Value.x, ImGuiColorEditFlags_NoInputs);
+                ImGui::ColorEdit3("##pal_color", &pal[i].Value.x, ImGuiColorEditFlags_NoInputs);
                 ImGui::SameLine();
                 ImGui::PopID();
             }
@@ -352,17 +639,62 @@ static void _ui_game_draw_sel_res(ui_game_t* ui) {
         _ui_game_get_pal_for_res(ui, ui->res.selected, pal);
         if(game_get_res_buf(ui->game, ui->res.selected, buffer)) {
             static const char* _res_ids[] = { "0x14", "0x17", "0x1a", "0x1d", "0x20", "0x23", "0x26", "0x29", "0x7d" };
-            decode_amiga(buffer, (uint32_t*)ui->res.buf, pal);
-            ui->video.texture_cbs.update_cb(ui->res.tex_bmp, ui->res.buf, GAME_WIDTH*GAME_HEIGHT*sizeof(uint32_t));
+            decode_amiga(buffer, (uint32_t*)ui->res.data.bmp.buf, pal);
+            ui->video.texture_cbs.update_cb(ui->res.tex_bmp, ui->res.data.bmp.buf, GAME_WIDTH*GAME_HEIGHT*sizeof(uint32_t));
             ImGui::Image(ui->res.tex_bmp, ImVec2(GAME_WIDTH, GAME_HEIGHT));
-            ImGui::Checkbox("Palette overwrite", &ui->res.data.pal_ovw);
-            ImGui::BeginDisabled(!ui->res.data.pal_ovw);
-            ImGui::SliderInt("Palette res", &ui->res.data.pal_res_idx, 0, 8, _res_ids[ui->res.data.pal_res_idx]);
-            ImGui::SliderInt("Palette id", &ui->res.data.pal_idx, 0, 15);
+            ImGui::Checkbox("Palette overwrite", &ui->res.data.pal.ovw);
+            ImGui::BeginDisabled(!ui->res.data.pal.ovw);
+            ImGui::SliderInt("Palette res", &ui->res.data.pal.res_idx, 0, 8, _res_ids[ui->res.data.pal.res_idx]);
+            ImGui::SliderInt("Palette id", &ui->res.data.pal.idx, 0, 32);
             ImGui::EndDisabled();
         } else {
             ImGui::Text("Not available");
         }
+    } else if(e->type == RT_SHAPE || e->type == RT_BANK) {
+        // get polygon offsets
+        if(game_get_res_buf(ui->game, ui->res.selected, ui->res.data.poly.buf)) {
+            const float line_height = ImGui::GetTextLineHeight();
+            ImGui::Text("Polygon offsets");
+            ImGui::Separator();
+            ImGui::BeginChild("##poly_offsets", ImVec2(ImGui::GetContentRegionAvail()[0], 10 * line_height), false);
+            _ui_game_get_poly_offsets(ui->res.data.poly.buf, e->unpacked_size, &ui->res.data.poly.info);
+            char offset_txt[5] = { 0 };
+            for(int i=0; i<ui->res.data.poly.info.num_offset; i++) {
+                snprintf(offset_txt, sizeof(offset_txt), "%04X", ui->res.data.poly.info.offsets[i]);
+                ImGui::PushID(i);
+                bool selected = ui->res.data.poly.offset == ui->res.data.poly.info.offsets[i];
+                if(ImGui::Selectable(offset_txt, selected)) {
+                    ui->res.data.poly.offset = ui->res.data.poly.info.offsets[i];
+                }
+                ImGui::PopID();
+            }
+            ImGui::EndChild();
+        } else {
+            ImGui::Text("Not available");
+        }
+        // draw selected polygon(s)
+        if(ui->res.data.poly.offset != 0xffff) {
+            _game_point_t pt {.x = (int16_t)ui->res.data.poly.pos[0], .y = (int16_t)ui->res.data.poly.pos[1]};
+            memset(ui->res.data.poly.img, 0, GAME_WIDTH*GAME_HEIGHT);
+            _game_video_draw_shape(ui, ui->res.data.poly.buf + ui->res.data.poly.offset, 0xff, ui->res.data.poly.zoom, &pt);
+            ImColor pal[16];
+            const int res_pal_index = ui->res.selected - 2;
+            game_get_res_buf(ui->game, res_pal_index, ui->res.data.pal.buf);
+            _ui_game_get_palette(ui->res.data.pal.buf, ui->res.data.poly.pal_idx, pal);
+            uint32_t* buf = (uint32_t*)ui->res.data.bmp.buf;
+            for(int i=0;i<GAME_WIDTH*GAME_HEIGHT;i++) {
+                buf[i] = pal[ui->res.data.poly.img[i]];
+            }
+            ui->video.texture_cbs.update_cb(ui->res.tex_fb, buf, GAME_WIDTH*GAME_HEIGHT*sizeof(uint32_t));
+            ImGui::Separator();
+            ImGui::Image(ui->res.tex_fb, ImVec2(GAME_WIDTH, GAME_HEIGHT));
+            ImGui::Separator();
+            ImGui::SliderInt("palette", &ui->res.data.poly.pal_idx, 0, 32, "%02X");
+            ImGui::SliderInt2("pos", &ui->res.data.poly.pos[0], -480, 480);
+            ImGui::SliderInt("zoom", &ui->res.data.poly.zoom, 1, 320);
+        }
+    } else {
+        ImGui::Text("No preview");
     }
 }
 
@@ -412,6 +744,7 @@ static void _ui_game_draw_resources(ui_game_t* ui) {
                 snprintf(status_text, 256, "%02X", i);
                 if(ImGui::Selectable(status_text, ui->res.selected == i, ImGuiSelectableFlags_SpanAllColumns)) {
                     ui->res.selected = i;
+                    ui->res.data.poly.offset = 0xffff;
                 }
                 ImGui::TableNextColumn();
                 static const char* labels[]  = {"Sound", "Music", "Bitmap", "Palette", "Byte code", "Shape", "Bank"};
@@ -526,6 +859,9 @@ void ui_game_init(ui_game_t* ui, const ui_game_desc_t* ui_desc) {
         ui->res.y = 20;
         ui->res.w = 562;
         ui->res.h = 568;
+        ui->res.data.poly.pos[0] = 160;
+        ui->res.data.poly.pos[1] = 100;
+        ui->res.data.poly.zoom = 64;
     }
     {
         ui->vm.x = 10;
@@ -534,11 +870,13 @@ void ui_game_init(ui_game_t* ui, const ui_game_desc_t* ui_desc) {
         ui->vm.h = 568;
     }
     ui->res.tex_bmp = ui->video.texture_cbs.create_cb(GAME_WIDTH, GAME_HEIGHT);
+    ui->res.tex_fb = ui->video.texture_cbs.create_cb(GAME_WIDTH, GAME_HEIGHT);
 }
 
 void ui_game_discard(ui_game_t* ui) {
     GAME_ASSERT(ui && ui->game);
     ui->video.texture_cbs.destroy_cb(ui->res.tex_bmp);
+    ui->video.texture_cbs.destroy_cb(ui->res.tex_fb);
     for(int i=0; i<4; i++) {
         ui->video.texture_cbs.destroy_cb(ui->video.tex_fb[i]);
     }
