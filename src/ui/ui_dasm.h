@@ -54,9 +54,10 @@ extern "C" {
 
 /* callback for reading a byte from memory */
 typedef uint8_t (*ui_dasm_read_t)(int layer, uint16_t addr, bool* valid, void* user_data);
+typedef const char* (*ui_dasm_getstr_t)(uint16_t id, void* user_data);
 
 #define UI_DASM_MAX_LAYERS (16)
-#define UI_DASM_MAX_STRLEN (32)
+#define UI_DASM_MAX_STRLEN (32*4)
 #define UI_DASM_MAX_BINLEN (16)
 #define UI_DASM_NUM_LINES  (4096)
 #define UI_DASM_MAX_STACK  (128)
@@ -70,6 +71,7 @@ typedef struct {
     const char* layers[UI_DASM_MAX_LAYERS];   /* memory system layer names */
     uint16_t start_addr;
     ui_dasm_read_t read_cb;
+    ui_dasm_getstr_t getstr_cb;
     void* user_data;
     int x, y;           /* initial window pos */
     int w, h;           /* initial window size or 0 for default size */
@@ -79,6 +81,7 @@ typedef struct {
 typedef struct {
     const char* title;
     ui_dasm_read_t read_cb;
+    ui_dasm_getstr_t getstr_cb;
     int cur_layer;
     int num_layers;
     const char* layers[UI_DASM_MAX_LAYERS];
@@ -126,6 +129,7 @@ void ui_dasm_init(ui_dasm_t* win, const ui_dasm_desc_t* desc) {
     memset(win, 0, sizeof(ui_dasm_t));
     win->title = desc->title;
     win->read_cb = desc->read_cb;
+    win->getstr_cb = desc->getstr_cb;
     win->start_addr = desc->start_addr;
     win->user_data = desc->user_data;
     win->init_x = (float) desc->x;
@@ -172,11 +176,16 @@ static void _ui_dasm_out_cb(char c, void* user_data) {
     }
 }
 
+static const char* _ui_dasm_getstr_cb(uint16_t id, void* user_data) {
+    ui_dasm_t* win = (ui_dasm_t*) user_data;
+    return win->getstr_cb(id, win->user_data);
+}
+
 /* disassemble the next instruction */
 static void _ui_dasm_disasm(ui_dasm_t* win) {
     win->str_pos = 0;
     win->bin_pos = 0;
-    raw_dasm_op(win->cur_addr, _ui_dasm_in_cb, _ui_dasm_out_cb, win);
+    raw_dasm_op(win->cur_addr, _ui_dasm_in_cb, _ui_dasm_out_cb, _ui_dasm_getstr_cb, win);
 }
 
 static bool _ui_dasm_jumptarget(ui_dasm_t* win, uint16_t pc, uint16_t* out_addr) {
@@ -335,7 +344,7 @@ static void _ui_dasm_draw_stack(ui_dasm_t* win) {
         win->stack_num = 0;
     }
     char buf[5] = { 0 };
-    if (ImGui::ListBoxHeader("##stack", ImVec2(-1,-1))) {
+    if (ImGui::BeginListBox("##stack", ImVec2(-1,-1))) {
         for (int i = 0; i < win->stack_num; i++) {
             snprintf(buf, sizeof(buf), "%04X", win->stack[i]);
             ImGui::PushID(i);
@@ -349,7 +358,7 @@ static void _ui_dasm_draw_stack(ui_dasm_t* win) {
             }
             ImGui::PopID();
         }
-        ImGui::ListBoxFooter();
+        ImGui::EndListBox();
     }
     ImGui::EndChild();
 }

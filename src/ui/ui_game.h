@@ -198,54 +198,38 @@ static void _ui_game_draw_vm(ui_game_t* ui) {
     if (!ui->vm.open) {
         return;
     }
+    struct { int var; const char* str; } var_names[] = {
+        {GAME_VAR_RANDOM_SEED, "RANDOM_SEED"},
+        {GAME_VAR_SCREEN_NUM, "SCREEN_NUM"},
+        {GAME_VAR_LAST_KEYCHAR, "LAST_KEYCHAR"},
+        {GAME_VAR_HERO_POS_UP_DOWN, "HERO_POS_UP_DOWN"},
+        {GAME_VAR_MUSIC_SYNC, "MUSIC_SYNC"},
+        {GAME_VAR_SCROLL_Y, "SCROLL_Y"},
+        {GAME_VAR_HERO_ACTION, "HERO_ACTION"},
+        {GAME_VAR_HERO_POS_JUMP_DOWN, "HERO_POS_JUMP_DOWN"},
+        {GAME_VAR_HERO_POS_LEFT_RIGHT, "HERO_POS_LEFT_RIGHT"},
+        {GAME_VAR_HERO_POS_MASK, "HERO_POS_MASK"},
+        {GAME_VAR_HERO_ACTION_POS_MASK, "HERO_ACTION_POS_MASK"},
+        {GAME_VAR_PAUSE_SLICES, "PAUSE_SLICES"},
+    };
+    const int var_names_size = sizeof(var_names) / sizeof(var_names[0]);
+
     ImGui::SetNextWindowPos(ImVec2((float)ui->vm.x, (float)ui->vm.y), ImGuiCond_Once);
     ImGui::SetNextWindowSize(ImVec2((float)ui->vm.w, (float)ui->vm.h), ImGuiCond_Once);
     if (ImGui::Begin("Virtual machine", &ui->vm.open)) {
         if (ImGui::CollapsingHeader("Variables", ImGuiTreeNodeFlags_DefaultOpen)) {
+            char tmp[16];
             for(int i=0; i<256; i++) {
                 const char* s = NULL;
-                char tmp[16];
-                switch(i) {
-                    case GAME_VAR_RANDOM_SEED:
-                    s = "RANDOM_SEED";
-                    break;
-                    case GAME_VAR_SCREEN_NUM:
-                    s = "SCREEN_NUM";
-                    break;
-                    case GAME_VAR_LAST_KEYCHAR:
-                    s = "LAST_KEYCHAR";
-                    break;
-                    case GAME_VAR_HERO_POS_UP_DOWN:
-                    s = "HERO_POS_UP_DOWN";
-                    break;
-                    case GAME_VAR_MUSIC_SYNC:
-                    s = "MUSIC_SYNC";
-                    break;
-                    case GAME_VAR_SCROLL_Y:
-                    s = "SCROLL_Y";
-                    break;
-                    case GAME_VAR_HERO_ACTION:
-                    s = "HERO_ACTION";
-                    break;
-                    case GAME_VAR_HERO_POS_JUMP_DOWN:
-                    s = "GAME_VAR_HERO_POS_JUMP_DOWN";
-                    break;
-                    case GAME_VAR_HERO_POS_LEFT_RIGHT:
-                    s = "GAME_VAR_HERO_POS_LEFT_RIGHT";
-                    break;
-                    case GAME_VAR_HERO_POS_MASK:
-                    s = "GAME_VAR_HERO_POS_MASK";
-                    break;
-                    case GAME_VAR_HERO_ACTION_POS_MASK:
-                    s = "GAME_VAR_HERO_ACTION_POS_MASK";
-                    break;
-                    case GAME_VAR_PAUSE_SLICES:
-                    s = "GAME_VAR_PAUSE_SLICES";
-                    break;
-                    default:
+                for(int j=0; j<var_names_size; j++) {
+                    if(var_names[j].var == i) {
+                        s = var_names[j].str;
+                        break;
+                    }
+                }
+                if(!s) {
                     snprintf(tmp, 16, "v%u", i);
                     s = tmp;
-                    break;
                 }
                 ImGui::Text("%s = %d", s, ui->game->vm.vars[i]);
             }
@@ -630,7 +614,7 @@ static void _ui_game_draw_sel_res(ui_game_t* ui) {
             // 1 palette is 16 colors
             ImColor pal[16];
             _ui_game_get_palette(ui->res.data.pal.buf, num, pal);
-            ImGui::Text("%02D", num);
+            ImGui::Text("%02d", num);
             ImGui::SameLine();
             for (int i = 0; i < 16; ++i) {
                 ImGui::PushID(i);
@@ -816,14 +800,20 @@ static void _ui_game_draw_video(ui_game_t* ui) {
 static uint8_t _ui_raw_mem_read(int layer, uint16_t addr, bool* valid, void* user_data) {
     GAME_ASSERT(user_data);
     (void)layer;
-    game_t* game = (game_t*) user_data;
-    uint8_t* pc = game->res.seg_code;
+    ui_game_t* ui = (ui_game_t*) user_data;
+    uint8_t* pc = ui->game->res.seg_code;
     *valid = false;
-    if (pc != NULL && addr >= 0 && addr < game->res.seg_code_size) {
+    if (pc != NULL && addr >= 0 && addr < ui->game->res.seg_code_size) {
         *valid = true;
         return pc[addr];
     }
     return 0;
+}
+
+static const char* _ui_raw_getstr(uint16_t id, void* user_data) {
+    GAME_ASSERT(user_data);
+    ui_game_t* ui = (ui_game_t*) user_data;
+    return game_get_string(ui->game, id);
 }
 
 static uint8_t _ui_raw_dasm_read(int layer, uint16_t addr, bool* valid, void* user_data) {
@@ -850,9 +840,10 @@ void ui_game_init(ui_game_t* ui, const ui_game_desc_t* ui_desc) {
         desc.x = 10;
         desc.y = 20;
         desc.read_cb = _ui_raw_mem_read;
+        desc.getstr_cb = _ui_raw_getstr;
         desc.texture_cbs = ui_desc->dbg_texture;
         desc.keys = ui_desc->dbg_keys;
-        desc.user_data = ui->game;
+        desc.user_data = ui;
         ui_dbg_init(&ui->dbg, &desc);
     }
     int x = 20, y = 20, dx = 10, dy = 10;
@@ -860,7 +851,8 @@ void ui_game_init(ui_game_t* ui, const ui_game_desc_t* ui_desc) {
         ui_dasm_desc_t desc = {0};
         desc.layers[0] = "System";
         desc.read_cb = _ui_raw_mem_read;
-        desc.user_data = ui->game;
+        desc.getstr_cb = _ui_raw_getstr;
+        desc.user_data = ui;
         static const char* titles[4] = { "Disassembler #1", "Disassembler #2", "Disassembler #2", "Dissassembler #3" };
         for (int i = 0; i < 4; i++) {
             desc.title = titles[i]; desc.x = x; desc.y = y;
@@ -872,6 +864,7 @@ void ui_game_init(ui_game_t* ui, const ui_game_desc_t* ui_desc) {
         ui_dasm_desc_t desc = {0};
         desc.layers[0] = "System";
         desc.read_cb = _ui_raw_dasm_read;
+        desc.getstr_cb = _ui_raw_getstr;
         desc.user_data = ui;
         desc.title = "Disassembler"; desc.x = x; desc.y = y;
         ui_dasm_init(&ui->res.data.code.dasm, &desc);

@@ -372,6 +372,7 @@ void game_debug_snapshot_onsave(game_debug_t* snapshot);
 void game_debug_snapshot_onload(game_debug_t* snapshot, game_debug_t* sys);
 bool game_load_snapshot(game_t* game, uint32_t version, game_t* src);
 uint32_t game_save_snapshot(game_t* game, game_t* dst);
+const char* game_get_string(game_t* game, uint16_t id);
 
 #ifdef __cplusplus
 } /* extern "C" */
@@ -3288,7 +3289,7 @@ static bool _game_vm_run(game_t* game) {
             _game_vm_setup_tasks(game);
             _game_vm_update_input(game);
         }
-        
+
         if (game->vm.tasks[i].pc != _GAME_INACTIVE_TASK) {
             game->vm.stack_ptr = 0;
             game->vm.current_task = i;
@@ -3537,6 +3538,15 @@ uint32_t game_save_snapshot(game_t* game, game_t* dst) {
     game_debug_snapshot_onsave(&dst->debug);
     game_audio_callback_snapshot_onsave(&dst->audio.callback);
     return GAME_SNAPSHOT_VERSION;
+}
+
+const char* game_get_string(game_t* game, uint16_t id) {
+   for (const game_str_entry_t *se = game->strings_table; se->id != 0xFFFF; ++se) {
+     if (se->id == id) {
+         return se->str;
+     }
+   }
+   return "???";
 }
 
 #endif /* GAME_IMPL */

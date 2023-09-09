@@ -31,9 +31,11 @@ extern "C" {
 typedef uint8_t (*raw_dasm_input_t)(void* user_data);
 /* the output callback type */
 typedef void (*raw_dasm_output_t)(char c, void* user_data);
+/* the get string callback type */
+typedef const char* (*raw_getstrt_t)(uint16_t id, void* user_data);
 
 /* disassemble a single Another World instruction into a stream of ASCII characters */
-uint16_t raw_dasm_op(uint16_t pc, raw_dasm_input_t in_cb, raw_dasm_output_t out_cb, void* user_data);
+uint16_t raw_dasm_op(uint16_t pc, raw_dasm_input_t in_cb, raw_dasm_output_t out_cb, raw_getstrt_t get_str_cb, void* user_data);
 
 #ifdef __cplusplus
 } /* extern "C" */
@@ -130,7 +132,9 @@ static void _raw_dasm_u16(uint16_t val, raw_dasm_output_t out_cb, void* user_dat
 }
 
 /* main disassembler function */
-uint16_t raw_dasm_op(uint16_t pc, raw_dasm_input_t in_cb, raw_dasm_output_t out_cb, void* user_data) {
+uint16_t raw_dasm_op(uint16_t pc, raw_dasm_input_t in_cb, raw_dasm_output_t out_cb, raw_getstrt_t get_str_cb, void* user_data) {
+    game_t* game = (game_t*)user_data;
+    GAME_ASSERT(game);
     GAME_ASSERT(in_cb);
     uint8_t op;
     uint8_t u8; uint16_t u16; int16_t i16;
@@ -180,7 +184,7 @@ uint16_t raw_dasm_op(uint16_t pc, raw_dasm_input_t in_cb, raw_dasm_output_t out_
         case 0x0f: _FETCH_U8(u8); _STR("copy "); _STR_U8(u8); _FETCH_U8(u8); _CHR(' '); _STR_U8(u8); break; // copyPage
         case 0x10: _FETCH_U8(u8); _STR("show "); _STR_U8(u8); break; // updateDisplay
         case 0x11: _STR("bigend"); break; // removeTask
-        case 0x12: _FETCH_U16(u16); _STR("text "); _STR_U16(u16); _CHR(' '); _FETCH_U8(u8); _STR_U8(u8); _CHR(' '); _FETCH_U8(u8); _STR_U8(u8); _CHR(' '); _FETCH_U8(u8); _STR_U8(u8); break; // text "text number", x, y, color
+        case 0x12: _FETCH_U16(u16); _STR("text "); _CHR('\"'); _STR(get_str_cb(u16, user_data)); _STR("\" "); _STR_U16(u16); _CHR(' '); _FETCH_U8(u8); _STR_U8(u8); _CHR(' '); _FETCH_U8(u8); _STR_U8(u8); _CHR(' '); _FETCH_U8(u8); _STR_U8(u8); break; // text "text number", x, y, color
         case 0x13: _FETCH_U8(u8); _STR("v"); _STR_U8(u8); _STR(" -= "); _FETCH_U8(u8); _STR("v"); _STR_U8(u8); break; // sub
         case 0x14: _FETCH_U8(u8); _STR("v"); _STR_U8(u8); _STR(" &= "); _FETCH_U16(u16); _STR_U16(u16); break; // and
         case 0x15: _FETCH_U8(u8); _STR("v"); _STR_U8(u8); _STR(" |= "); _FETCH_U16(u16); _STR_U16(u16); break; // or

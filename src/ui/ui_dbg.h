@@ -98,6 +98,7 @@ typedef struct ui_dbg_user_breaktype_t {
 struct ui_dbg_t;
 /* callback for reading a byte from memory */
 typedef uint8_t (*ui_dbg_read_t)(int layer, uint16_t addr, bool* valid, void* user_data);
+typedef const char* (*ui_dbg_getstr_t)(uint16_t id, void* user_data);
 /* callback for evaluating uer breakpoints, return breakpoint index, or -1 */
 typedef int (*ui_dbg_user_break_t)(struct ui_dbg_t* win, int trap_id, uint64_t pins, void* user_data);
 /* a callback to create a dynamic-update RGBA8 UI texture, needs to return an ImTextureID handle */
@@ -130,6 +131,7 @@ typedef struct ui_dbg_texture_callbacks_t {
 typedef struct ui_dbg_desc_t {
     const char* title;          /* window title */
     ui_dbg_read_t read_cb;          /* callback to read memory */
+    ui_dbg_getstr_t getstr_cb;        /* callback to get a string from its id */
     int read_layer;                 /* layer argument for read_cb */
     ui_dbg_user_break_t break_cb;   /* optional user-breakpoint evaluation callback */
     ui_dbg_texture_callbacks_t texture_cbs;
@@ -220,6 +222,7 @@ typedef struct ui_dbg_history_t {
 typedef struct ui_dbg_t {
     bool valid;
     ui_dbg_read_t read_cb;
+    ui_dbg_getstr_t getstr_cb;
     int read_layer;
     ui_dbg_user_break_t break_cb;
     ui_dbg_texture_callbacks_t texture_cbs;
@@ -303,12 +306,17 @@ static void _ui_dbg_dasm_out_cb(char c, void* user_data) {
     }
 }
 
+static const char* _ui_dbg_getstr_cb(uint16_t id, void* user_data) {
+    ui_dbg_t* win = (ui_dbg_t*) user_data;
+    return win->getstr_cb(id, win->user_data);
+}
+
 /* disassemble the next instruction */
 static inline uint16_t _ui_dbg_disasm(ui_dbg_t* win, uint16_t pc) {
     win->dasm.cur_addr = pc;
     win->dasm.str_pos = 0;
     win->dasm.bin_pos = 0;
-    raw_dasm_op(pc, _ui_dbg_dasm_in_cb, _ui_dbg_dasm_out_cb, win);
+    raw_dasm_op(pc, _ui_dbg_dasm_in_cb, _ui_dbg_dasm_out_cb, _ui_dbg_getstr_cb, win);
     return win->dasm.cur_addr;
 }
 
@@ -317,7 +325,7 @@ static inline uint16_t _ui_dbg_disasm_len(ui_dbg_t* win, uint16_t pc) {
     win->dasm.cur_addr = pc;
     win->dasm.str_pos = 0;
     win->dasm.bin_pos = 0;
-    uint16_t next_pc = raw_dasm_op(pc, _ui_dbg_dasm_in_cb, 0, win);
+    uint16_t next_pc = raw_dasm_op(pc, _ui_dbg_dasm_in_cb, 0, _ui_dbg_getstr_cb, win);
     return next_pc - pc;
 }
 
@@ -1255,6 +1263,7 @@ void ui_dbg_init(ui_dbg_t* win, ui_dbg_desc_t* desc) {
     memset(win, 0, sizeof(ui_dbg_t));
     win->valid = true;
     win->read_cb = desc->read_cb;
+    win->getstr_cb = desc->getstr_cb;
     win->read_layer = desc->read_layer;
     win->break_cb = desc->break_cb;
     win->create_texture_cb = desc->texture_cbs.create_cb;
