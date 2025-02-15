@@ -20,6 +20,7 @@
 #include "miniz.h"
 #include "fs.h"
 #if defined(GAME_USE_UI)
+    #include "ui/ui_util.h"
     #include "ui.h"
     #include "ui/raw_dasm.h"
     #include "ui/ui_dasm.h"

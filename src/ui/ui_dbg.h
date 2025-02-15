@@ -102,11 +102,11 @@ typedef const char* (*ui_dbg_getstr_t)(uint16_t id, void* user_data);
 /* callback for evaluating uer breakpoints, return breakpoint index, or -1 */
 typedef int (*ui_dbg_user_break_t)(struct ui_dbg_t* win, int trap_id, uint64_t pins, void* user_data);
 /* a callback to create a dynamic-update RGBA8 UI texture, needs to return an ImTextureID handle */
-typedef void* (*ui_dbg_create_texture_t)(int w, int h);
+typedef ui_texture_t (*ui_dbg_create_texture_t)(int w, int h);
 /* callback to update a UI texture with new data */
-typedef void (*ui_dbg_update_texture_t)(void* tex_handle, void* data, int data_byte_size);
+typedef void (*ui_dbg_update_texture_t)(ui_texture_t tex_handle, void* data, int data_byte_size);
 /* callback to destroy a UI texture */
-typedef void (*ui_dbg_destroy_texture_t)(void* tex_handle);
+typedef void (*ui_dbg_destroy_texture_t)(ui_texture_t tex_handle);
 
 /* user-defined hotkeys (all strings must be static) */
 typedef struct ui_dbg_key_desc_t {
@@ -203,7 +203,7 @@ typedef struct ui_dbg_heatmap_t {
     int tex_width, tex_height;
     int tex_width_uicombo_state;
     int next_tex_width;
-    void* texture;
+    ui_texture_t texture;
     bool show_ops, show_reads, show_writes;
     int autoclear_interval; /* 0: no autoclear */
     int scale;
@@ -1244,7 +1244,7 @@ static void _ui_dbg_dbgwin_draw(ui_dbg_t* win) {
     ImGui::SetNextWindowSize(ImVec2(win->ui.init_w, win->ui.init_h), ImGuiCond_Once);
     if (ImGui::Begin(win->ui.title, &win->ui.open, ImGuiWindowFlags_MenuBar)) {
         if (ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows)) {
-            ImGui::CaptureKeyboardFromApp();
+            ImGui::SetNextFrameWantCaptureKeyboard(true);
             _ui_dbg_handle_input(win);
         }
         _ui_dbg_draw_menu(win);

@@ -48,6 +48,9 @@
 extern "C" {
 #endif
 
+// Dear ImGui compatible texture handle
+typedef uint64_t ui_texture_t;
+
 /* draw an 16-bit hex text input field */
 uint16_t ui_util_input_u16(const char* label, uint16_t val);
 /* draw an 8-bit hex text input field */

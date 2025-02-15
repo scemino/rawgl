@@ -50,7 +50,7 @@ typedef struct {
     int w, h;
     bool open;
     ui_dbg_texture_callbacks_t texture_cbs;
-    void* tex_fb[4];
+    ui_texture_t tex_fb[4];
     uint32_t pixel_buffer[GAME_WIDTH*GAME_HEIGHT];
 } ui_game_video_t;
 
@@ -64,8 +64,8 @@ typedef struct {
     int x, y;
     int w, h;
     bool open;
-    void* tex_bmp;
-    void* tex_fb;
+    ui_texture_t tex_bmp;
+    ui_texture_t tex_fb;
     int selected;
     bool filters[7]; // filter each resource types
     struct {

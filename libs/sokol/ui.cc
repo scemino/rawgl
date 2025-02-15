@@ -1,6 +1,7 @@
 //------------------------------------------------------------------------------
 //  ui.cc
 //------------------------------------------------------------------------------
+#include "ui/ui_util.h"
 #include "ui.h"
 #include "sokol_gfx.h"
 #include "sokol_app.h"
@@ -16,9 +17,9 @@ static struct {
     ui_draw_t draw_cb;
     sg_sampler nearest_sampler;
     sg_sampler linear_sampler;
-    simgui_image_t empty_snapshot_texture;
+    sg_image empty_snapshot_texture;
     struct {
-        simgui_image_t images[UI_DELETE_STACK_SIZE];
+        sg_image images[UI_DELETE_STACK_SIZE];
         size_t cur_slot;
     } delete_stack;
 } state;
@@ -57,10 +58,7 @@ static void commit_listener(void* user_data) {
     (void)user_data;
     // garbage collect images
     for (size_t i = 0; i < state.delete_stack.cur_slot; i++) {
-        simgui_image_t img = state.delete_stack.images[i];
-        const simgui_image_desc_t desc = simgui_query_image_desc(img);
-        sg_destroy_image(desc.image);
-        simgui_destroy_image(img);
+        sg_destroy_image(state.delete_stack.images[i]);
     }
     state.delete_stack.cur_slot = 0;
 }
@@ -89,6 +87,12 @@ void ui_init(ui_draw_t draw_cb) {
         .wrap_u = SG_WRAP_CLAMP_TO_EDGE,
         .wrap_v = SG_WRAP_CLAMP_TO_EDGE,
     });
+
+    state.empty_snapshot_texture = gfx_create_icon_texture(
+        empty_snapshot_icon.pixels,
+        empty_snapshot_icon.width,
+        empty_snapshot_icon.height,
+        empty_snapshot_icon.stride);
 }
 
 void ui_discard(void) {
@@ -110,34 +114,32 @@ bool ui_input(const sapp_event* event) {
     return simgui_handle_event(event);
 }
 
-void* ui_create_texture(int w, int h) {
-    return simgui_imtextureid(simgui_make_image({
-        .image = sg_make_image({
+ui_texture_t ui_create_texture(int w, int h) {
+    return simgui_imtextureid_with_sampler(
+        sg_make_image({
             .width = w,
             .height = h,
             .usage = SG_USAGE_STREAM,
             .pixel_format = SG_PIXELFORMAT_RGBA8,
         }),
-        .sampler = state.nearest_sampler,
-    }));
+        state.nearest_sampler);
 }
 
-void ui_update_texture(void* h, void* data, int data_byte_size) {
-    simgui_image_t img = simgui_image_from_imtextureid(h);
-    const simgui_image_desc_t desc = simgui_query_image_desc(img);
+void ui_update_texture(ui_texture_t h, void* data, int data_byte_size) {
+    sg_image img = simgui_image_from_imtextureid(h);
     sg_image_data img_data = { };
     img_data.subimage[0][0] = { .ptr = data, .size = (size_t) data_byte_size };
-    sg_update_image(desc.image, img_data);
+    sg_update_image(img, img_data);
 }
 
-void ui_destroy_texture(void* h) {
+void ui_destroy_texture(ui_texture_t h) {
     if (state.delete_stack.cur_slot < UI_DELETE_STACK_SIZE) {
         state.delete_stack.images[state.delete_stack.cur_slot++] = simgui_image_from_imtextureid(h);
     }
 }
 
 // creates a 2x downscaled screenshot texture of the emulator framebuffer
-void* ui_create_screenshot_texture(gfx_display_info_t info) {
+ui_texture_t ui_create_screenshot_texture(gfx_display_info_t info) {
     assert(info.frame.buffer.ptr);
 
     size_t dst_w = (info.screen.width + 1) >> 1;
@@ -193,23 +195,9 @@ void* ui_create_screenshot_texture(gfx_display_info_t info) {
     img_desc.data.subimage[0][0] = { .ptr = dst, .size = dst_num_bytes };
     sg_image img = sg_make_image(img_desc);
     free(dst);
-    return simgui_imtextureid(simgui_make_image({
-        .image = img,
-        .sampler = state.linear_sampler,
-    }));
+    return simgui_imtextureid_with_sampler(img, state.linear_sampler);
 }
 
-void* ui_shared_empty_snapshot_texture(void) {
-    // must create on demand to prevent chicken/egg problem with sokol-imgui initialization
-    if (state.empty_snapshot_texture.id == 0) {
-        state.empty_snapshot_texture = simgui_make_image({
-            .image = gfx_create_icon_texture(
-                empty_snapshot_icon.pixels,
-                empty_snapshot_icon.width,
-                empty_snapshot_icon.height,
-                empty_snapshot_icon.stride),
-            .sampler = state.nearest_sampler,
-        });
-    }
-    return simgui_imtextureid(state.empty_snapshot_texture);
+ui_texture_t ui_shared_empty_snapshot_texture(void) {
+    return simgui_imtextureid_with_sampler(state.empty_snapshot_texture, state.nearest_sampler);
 }
