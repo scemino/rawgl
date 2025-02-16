@@ -7,14 +7,18 @@
 #include "sokol_app.h"
 #include "sokol_time.h"
 #include "imgui.h"
+#include "imgui_internal.h" // ImGui::SettingsHandler
 #define SOKOL_IMGUI_IMPL
 #include "sokol_imgui.h"
 #include "gfx.h"
+#include "fs.h"
+#include <stdio.h> // snprintf
 
 #define UI_DELETE_STACK_SIZE (32)
 
 static struct {
     ui_draw_t draw_cb;
+    ui_save_settings_t save_settings_cb;
     sg_sampler nearest_sampler;
     sg_sampler linear_sampler;
     sg_image empty_snapshot_texture;
@@ -22,6 +26,8 @@ static struct {
         sg_image images[UI_DELETE_STACK_SIZE];
         size_t cur_slot;
     } delete_stack;
+    char imgui_ini_key[128];
+    ui_settings_t settings;
 } state;
 
 
@@ -54,23 +60,27 @@ static const struct {
     }
 };
 
-static void commit_listener(void* user_data) {
-    (void)user_data;
-    // garbage collect images
-    for (size_t i = 0; i < state.delete_stack.cur_slot; i++) {
-        sg_destroy_image(state.delete_stack.images[i]);
-    }
-    state.delete_stack.cur_slot = 0;
-}
+static void commit_listener(void* user_data);
+static void load_imgui_ini(void);
+static void handle_save_imgui_ini(void);
+static void register_imgui_settings_handler(void);
 
-void ui_init(ui_draw_t draw_cb) {
+void ui_init(const ui_desc_t* desc) {
+    assert(desc && desc->draw_cb && desc->imgui_ini_key);
+
+    state.save_settings_cb = desc->save_settings_cb;
+    snprintf(state.imgui_ini_key, sizeof(state.imgui_ini_key), "%s", desc->imgui_ini_key);
+
     simgui_desc_t simgui_desc = { };
     simgui_setup(&simgui_desc);
+    register_imgui_settings_handler();
+    ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     auto& style = ImGui::GetStyle();
     style.WindowRounding = 0.0f;
     style.WindowBorderSize = 1.0f;
     style.Alpha = 1.0f;
-    state.draw_cb = draw_cb;
+    state.draw_cb = desc->draw_cb;
+    load_imgui_ini();
     
     sg_add_commit_listener({ .func = commit_listener });
     
@@ -95,6 +105,10 @@ void ui_init(ui_draw_t draw_cb) {
         empty_snapshot_icon.stride);
 }
 
+const ui_settings_t* ui_settings(void) {
+    return &state.settings;
+}
+
 void ui_discard(void) {
     sg_destroy_sampler(state.nearest_sampler);
     sg_destroy_sampler(state.linear_sampler);
@@ -103,7 +117,11 @@ void ui_discard(void) {
 }
 
 void ui_draw(void) {
+    handle_save_imgui_ini();
     simgui_new_frame({sapp_width(), sapp_height(), sapp_frame_duration(), sapp_dpi_scale() });
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    const ImGuiID dockspace = ImGui::GetID("main_dockspace");
+    ImGui::DockSpaceOverViewport(dockspace, viewport, ImGuiDockNodeFlags_PassthruCentralNode);
     if (state.draw_cb) {
         state.draw_cb();
     }
@@ -200,4 +218,99 @@ ui_texture_t ui_create_screenshot_texture(gfx_display_info_t info) {
 
 ui_texture_t ui_shared_empty_snapshot_texture(void) {
     return simgui_imtextureid_with_sampler(state.empty_snapshot_texture, state.nearest_sampler);
+}
+
+static void commit_listener(void* user_data) {
+    (void)user_data;
+    // garbage collect images
+    for (size_t i = 0; i < state.delete_stack.cur_slot; i++) {
+        sg_destroy_image(state.delete_stack.images[i]);
+    }
+    state.delete_stack.cur_slot = 0;
+}
+
+static void handle_save_imgui_ini(void) {
+    if (ImGui::GetIO().WantSaveIniSettings) {
+        ImGui::GetIO().WantSaveIniSettings = false;
+        fs_save_ini(state.imgui_ini_key, ImGui::SaveIniSettingsToMemory());
+    }
+}
+
+static void load_imgui_ini(void) {
+    const char* payload = fs_load_ini(state.imgui_ini_key);
+    if (payload) {
+        ImGui::LoadIniSettingsFromMemory(payload);
+        fs_free_ini(payload);
+    }
+}
+
+// ImGui Settings handler implementation
+
+// clear all settings data
+static void imgui_ClearAllFn(ImGuiContext* ctx, ImGuiSettingsHandler* handler) {
+    (void)ctx; (void)handler;
+    ui_settings_init(&state.settings);
+}
+
+// read: Called before reading (in registration order)
+static void imgui_ReadInitFn(ImGuiContext* ctx, ImGuiSettingsHandler* handler) {
+    (void)ctx; (void)handler;
+    ui_settings_init(&state.settings);
+}
+
+// read: Called when entering into a new ini entry e.g. "[Window][Name]"
+static void* imgui_ReadOpenFn(ImGuiContext* ctx, ImGuiSettingsHandler* handler, const char* name) {
+    (void)ctx; (void)handler;
+    ui_settings_add(&state.settings, name, false);
+    // NOTE: cannot return nullptr since this means 'no valid ini entry'
+    return (void*)&state.settings;
+}
+
+// read: Called for every line of text within an ini entry
+static void imgui_ReadLineFn(ImGuiContext* ctx, ImGuiSettingsHandler* handler, void* entry, const char* line) {
+    (void)ctx; (void)handler; (void)entry;
+    assert(state.settings.num_slots > 0);
+    int cur_slot_idx = state.settings.num_slots - 1;
+    int is_open = 0;
+    if (sscanf(line, "IsOpen=%i", &is_open) == 1) {
+        state.settings.slots[cur_slot_idx].open = true;
+    }
+}
+
+// read: Called after reading (in registration order)
+static void imgui_ApplyAllFn(ImGuiContext* ctx, ImGuiSettingsHandler* handler) {
+    (void)ctx; (void)handler;
+}
+
+// write: output all entries into 'out_buf'
+static void imgui_WriteAllFn(ImGuiContext* ctx, ImGuiSettingsHandler* handler, ImGuiTextBuffer* buf) {
+    (void)ctx; (void)handler;
+    if (state.save_settings_cb) {
+        ui_settings_t settings;
+        ui_settings_init(&settings);
+        state.save_settings_cb(&settings);
+        buf->reserve(buf->size() + settings.num_slots * 64);
+        for (int i = 0; i < settings.num_slots; i++) {
+            const ui_settings_slot_t* slot = &settings.slots[i];
+            buf->appendf("[%s][%s]\n", handler->TypeName, slot->window_title.buf);
+            if (slot->open) {
+                buf->append("IsOpen=1\n");
+            }
+        }
+        buf->append("\n");
+    }
+}
+
+static void register_imgui_settings_handler(void) {
+    const char* type_name = "scemino.rawgl";
+    ImGuiSettingsHandler ini_handler;
+    ini_handler.TypeName = type_name;;
+    ini_handler.TypeHash = ImHashStr(type_name);
+    ini_handler.ClearAllFn = imgui_ClearAllFn;
+    ini_handler.ReadInitFn = imgui_ReadInitFn;
+    ini_handler.ReadOpenFn = imgui_ReadOpenFn;
+    ini_handler.ReadLineFn = imgui_ReadLineFn;
+    ini_handler.ApplyAllFn = imgui_ApplyAllFn;
+    ini_handler.WriteAllFn = imgui_WriteAllFn;
+    ImGui::AddSettingsHandler(&ini_handler);
 }

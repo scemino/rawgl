@@ -10,6 +10,7 @@
 #include "imgui.h"
 #include "ui/ui_util.h"
 #include "ui/raw_dasm.h"
+#include "ui_settings.h"
 #include "ui/ui_dbg.h"
 #include "ui/ui_dasm.h"
 #include "ui/ui_snapshot.h"

@@ -237,17 +237,21 @@ typedef struct ui_dbg_t {
     ui_dbg_history_t history;
 } ui_dbg_t;
 
-/* initialize a new ui_dbg_t instance */
+// initialize a new ui_dbg_t instance
 void ui_dbg_init(ui_dbg_t* win, ui_dbg_desc_t* desc);
-/* discard ui_dbg_t instance */
+// discard ui_dbg_t instance
 void ui_dbg_discard(ui_dbg_t* win);
-/* render the ui_dbg_t UIs */
+// save persistent state
+void ui_dbg_save_settings(ui_dbg_t* win, ui_settings_t* settings);
+// load persistent state
+void ui_dbg_load_settings(ui_dbg_t* win, const ui_settings_t* settings);
+// render the ui_dbg_t UIs
 void ui_dbg_draw(ui_dbg_t* win);
-/* call after ticking the system */
+// call after ticking the system
 void ui_dbg_tick(ui_dbg_t* win, uint64_t pins);
-/* call when resetting the emulated machine (re-initializes some data structures) */
+// call when resetting the emulated machine (re-initializes some data structures)
 void ui_dbg_reset(ui_dbg_t* win);
-/* call when rebooting the emulated machine (re-initializes some data structures) */
+// call when rebooting the emulated machine (re-initializes some data structures)
 void ui_dbg_reboot(ui_dbg_t* win);
 
 #ifdef __cplusplus
@@ -397,8 +401,8 @@ static void _ui_dbg_history_draw(ui_dbg_t* win) {
     if (!win->ui.show_history) {
         return;
     }
-    ImGui::SetNextWindowPos(ImVec2(win->ui.init_x + win->ui.init_w, win->ui.init_y + 64), ImGuiCond_Once);
-    ImGui::SetNextWindowSize(ImVec2(win->ui.init_w, 376), ImGuiCond_Once);
+    ImGui::SetNextWindowPos(ImVec2(win->ui.init_x + win->ui.init_w, win->ui.init_y + 64), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(win->ui.init_w, 376), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Execution History", &win->ui.show_history)) {
         const float line_height = ImGui::GetTextLineHeight();
         ImGui::SetNextWindowContentSize(ImVec2(0, UI_DBG_NUM_HISTORY_ITEMS * line_height));
@@ -671,8 +675,8 @@ static void _ui_dbg_bp_draw(ui_dbg_t* win) {
     if (!win->ui.show_breakpoints) {
         return;
     }
-    ImGui::SetNextWindowPos(ImVec2(win->ui.init_x + win->ui.init_w, win->ui.init_y), ImGuiCond_Once);
-    ImGui::SetNextWindowSize(ImVec2(-1, 256), ImGuiCond_Once);
+    ImGui::SetNextWindowPos(ImVec2(win->ui.init_x + win->ui.init_w, win->ui.init_y), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(-1, 256), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Breakpoints", &win->ui.show_breakpoints)) {
         bool scroll_down = false;
         if (ImGui::Button("Add..")) {
@@ -1240,8 +1244,8 @@ static void _ui_dbg_dbgwin_draw(ui_dbg_t* win) {
     if (!win->ui.open) {
         return;
     }
-    ImGui::SetNextWindowPos(ImVec2(win->ui.init_x, win->ui.init_y), ImGuiCond_Once);
-    ImGui::SetNextWindowSize(ImVec2(win->ui.init_w, win->ui.init_h), ImGuiCond_Once);
+    ImGui::SetNextWindowPos(ImVec2(win->ui.init_x, win->ui.init_y), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(win->ui.init_w, win->ui.init_h), ImGuiCond_FirstUseEver);
     if (ImGui::Begin(win->ui.title, &win->ui.open, ImGuiWindowFlags_MenuBar)) {
         if (ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows)) {
             ImGui::SetNextFrameWantCaptureKeyboard(true);
@@ -1279,6 +1283,18 @@ void ui_dbg_discard(ui_dbg_t* win) {
     GAME_ASSERT(win && win->valid);
     _ui_dbg_heatmap_discard(win);
     win->valid = false;
+}
+
+void ui_dbg_save_settings(ui_dbg_t* win, ui_settings_t* settings) {
+    ui_settings_add(settings, win->ui.title, win->ui.open);
+    ui_settings_add(settings, "Execution History", win->ui.show_history);
+    ui_settings_add(settings, "Breakpoints", win->ui.show_breakpoints);
+}
+
+void ui_dbg_load_settings(ui_dbg_t* win, const ui_settings_t* settings) {
+    win->ui.open = ui_settings_isopen(settings, win->ui.title);
+    win->ui.show_history = ui_settings_isopen(settings, "Execution History");
+    win->ui.show_breakpoints = ui_settings_isopen(settings, "Breakpoints");
 }
 
 void ui_dbg_reset(ui_dbg_t* win) {

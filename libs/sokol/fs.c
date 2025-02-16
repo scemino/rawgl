@@ -9,6 +9,7 @@
 #include <ctype.h>
 #include <stdio.h>
 #include <stdalign.h>
+#include <stdarg.h>
 #if defined(__EMSCRIPTEN__)
 #include <emscripten/emscripten.h>
 #endif
@@ -17,12 +18,11 @@
 #endif
 
 #define FS_EXT_SIZE (16)
-#define FS_PATH_SIZE (256)
+#define FS_PATH_SIZE (2048)
 #define FS_MAX_SIZE (2024 * 1024)
 
 typedef struct {
     char cstr[FS_PATH_SIZE];
-    size_t len;
     bool clamped;
 } fs_path_t;
 
@@ -37,11 +37,11 @@ typedef struct {
     uint8_t* ptr;
     size_t size;
     alignas(64) uint8_t buf[FS_MAX_SIZE + 1];
-} fs_slot_t;
+} fs_channel_state_t;
 
 typedef struct {
     bool valid;
-    fs_slot_t slots[FS_NUM_SLOTS];
+    fs_channel_state_t channels[FS_CHANNEL_NUM];
 } fs_state_t;
 static fs_state_t state;
 
@@ -50,7 +50,7 @@ void fs_init(void) {
     state.valid = true;
     sfetch_setup(&(sfetch_desc_t){
         .max_requests = 128,
-        .num_channels = FS_NUM_SLOTS,
+        .num_channels = FS_CHANNEL_NUM,
         .num_lanes = 1,
         .logger.func = slog_func,
     });
@@ -62,21 +62,46 @@ void fs_dowork(void) {
 }
 
 static void fs_path_reset(fs_path_t* path) {
-    path->len = 0;
+    memset(path->cstr, 0, sizeof(path->cstr));
+    path->clamped = false;
 }
 
-static void fs_path_append(fs_path_t* path, const char* str) {
-    const size_t max_len = sizeof(path->cstr) - 1;
-    char c;
-    while ((c = *str++) && (path->len < max_len)) {
-        path->cstr[path->len++] = c;
+#if defined (WIN32)
+bool fs_win32_path_to_wide(const fs_path_t* path, WCHAR* out_buf, size_t out_buf_size_in_bytes) {
+    if ((path->cstr[0] == 0) || (path->clamped)) {
+        return false;
     }
-    path->cstr[path->len] = 0;
-    path->clamped = (c != 0);
+    int out_num_chars = (int)(out_buf_size_in_bytes / sizeof(wchar_t));
+    if (0 == MultiByteToWideChar(CP_UTF8, 0, path->cstr, -1, out_buf, out_num_chars)) {
+        return false;
+    }
+    return true;
+}
+#endif
+
+#if defined(__GNUC__)
+static fs_path_t fs_path_printf(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+#endif
+static fs_path_t fs_path_printf(const char* fmt, ...) {
+    fs_path_t path = {0};
+    va_list args;
+    va_start(args, fmt);
+    int res = vsnprintf(path.cstr, sizeof(path.cstr), fmt, args);
+    va_end(args);
+    path.clamped = res >= (int)sizeof(path.cstr);
+    return path;
 }
 
-static bool fs_path_extract_extension(fs_path_t* path, char* buf, size_t buf_size) {
-    const char* ext = strrchr(path->cstr, '.');
+static void fs_path_extract_extension(fs_path_t* path, char* buf, size_t buf_size) {
+    const char* tail = strrchr(path->cstr, '\\');
+    if (0 == tail) {
+        tail = strrchr(path->cstr, '/');
+    }
+    if (0 == tail) {
+        tail = path->cstr;
+    }
+    const char* ext = strrchr(tail, '.');
+    buf[0] = 0;
     if (ext) {
         size_t i = 0;
         char c = 0;
@@ -85,16 +110,42 @@ static bool fs_path_extract_extension(fs_path_t* path, char* buf, size_t buf_siz
             i++;
         }
         buf[i] = 0;
-        return true;
+    }
+}
+
+fs_result_t fs_result(fs_channel_t chn) {
+    assert(state.valid);
+    assert(chn < FS_CHANNEL_NUM);
+    return state.channels[chn].result;
+}
+
+bool fs_success(fs_channel_t chn) {
+    return fs_result(chn) == FS_RESULT_SUCCESS;
+}
+
+bool fs_failed(fs_channel_t chn) {
+    return fs_result(chn) == FS_RESULT_FAILED;
+}
+
+bool fs_pending(fs_channel_t chn) {
+    return fs_result(chn) == FS_RESULT_PENDING;
+}
+
+gfx_range_t fs_data(fs_channel_t chn) {
+    assert(state.valid);
+    assert(chn < FS_CHANNEL_NUM);
+    fs_channel_state_t* channel = &state.channels[chn];
+    if (channel->result == FS_RESULT_SUCCESS) {
+        return (gfx_range_t){ .ptr = channel->ptr, .size = channel->size };
     }
     else {
-        return false;
+        return (gfx_range_t){0};
     }
 }
 
 // http://web.mit.edu/freebsd/head/contrib/wpa/src/utils/base64.c
 static const unsigned char fs_base64_table[65] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-static bool fs_base64_decode(fs_slot_t* slot, const char* src) {
+static bool fs_base64_decode(fs_channel_state_t* channel, const char* src) {
     int len = (int)strlen(src);
 
     uint8_t dtable[256];
@@ -118,7 +169,7 @@ static bool fs_base64_decode(fs_slot_t* slot, const char* src) {
 
     // output length
     int olen = (count / 4) * 3;
-    if (olen >= (int)sizeof(slot->buf)) {
+    if (olen >= (int)sizeof(channel->buf)) {
         return false;
     }
 
@@ -138,12 +189,12 @@ static bool fs_base64_decode(fs_slot_t* slot, const char* src) {
         count++;
         if (count == 4) {
             count = 0;
-            slot->buf[slot->size++] = (block[0] << 2) | (block[1] >> 4);
-            slot->buf[slot->size++] = (block[1] << 4) | (block[2] >> 2);
-            slot->buf[slot->size++] = (block[2] << 6) | block[3];
+            channel->buf[channel->size++] = (block[0] << 2) | (block[1] >> 4);
+            channel->buf[channel->size++] = (block[1] << 4) | (block[2] >> 2);
+            channel->buf[channel->size++] = (block[2] << 6) | block[3];
             if (pad > 0) {
                 if (pad <= 2) {
-                    slot->size -= pad;
+                    channel->size -= pad;
                 }
                 else {
                     // invalid padding
@@ -156,274 +207,107 @@ static bool fs_base64_decode(fs_slot_t* slot, const char* src) {
     return true;
 }
 
-bool fs_ext(size_t slot_index, const char* ext) {
+bool fs_ext(fs_channel_t chn, const char* ext) {
     assert(state.valid);
-    assert(slot_index < FS_NUM_SLOTS);
+    assert(chn < FS_CHANNEL_NUM);
     char buf[FS_EXT_SIZE];
-    if (fs_path_extract_extension(&state.slots[slot_index].path, buf, sizeof(buf))) {
-        return 0 == strcmp(ext, buf);
-    }
-    else {
-        return false;
-    }
+    fs_path_extract_extension(&state.channels[chn].path, buf, sizeof(buf));
+    return 0 == strcmp(ext, buf);
 }
 
-const char* fs_filename(size_t slot_index) {
+const char* fs_filename(fs_channel_t chn) {
     assert(state.valid);
-    assert(slot_index < FS_NUM_SLOTS);
-    return state.slots[slot_index].path.cstr;
+    assert(chn < FS_CHANNEL_NUM);
+    return state.channels[chn].path.cstr;
 }
 
-void fs_reset(size_t slot_index) {
+void fs_reset(fs_channel_t chn) {
     assert(state.valid);
-    assert(slot_index < FS_NUM_SLOTS);
-    fs_slot_t* slot = &state.slots[slot_index];
-    fs_path_reset(&slot->path);
-    slot->result = FS_RESULT_IDLE;
-    slot->ptr = 0;
-    slot->size = 0;
+    assert(chn < FS_CHANNEL_NUM);
+    fs_channel_state_t* channel = &state.channels[chn];
+    fs_path_reset(&channel->path);
+    channel->result = FS_RESULT_IDLE;
+    channel->ptr = 0;
+    channel->size = 0;
 }
 
-void fs_load_mem(size_t slot_index, const char* path, gfx_range_t data) {
+bool fs_load_base64(fs_channel_t chn, const char* name, const char* payload) {
     assert(state.valid);
-    assert(slot_index < FS_NUM_SLOTS);
-    assert(data.ptr && (data.size > 0));
-    fs_reset(slot_index);
-    fs_slot_t* slot = &state.slots[slot_index];
-    if ((data.size > 0) && (data.size <= FS_MAX_SIZE)) {
-        fs_path_append(&slot->path, path);
-        slot->result = FS_RESULT_SUCCESS;
-        slot->size = data.size;
-        slot->ptr = slot->buf;
-        memcpy(slot->ptr, data.ptr, data.size);
-        /* zero-terminate in case this is a text file */
-        slot->ptr[slot->size] = 0;
-    }
-    else {
-        slot->result = FS_RESULT_FAILED;
-    }
-}
-
-bool fs_load_base64(size_t slot_index, const char* name, const char* payload) {
-    assert(state.valid);
-    assert(slot_index < FS_NUM_SLOTS);
-    fs_reset(slot_index);
-    fs_slot_t* slot = &state.slots[slot_index];
-    fs_path_append(&slot->path, name);
-    if (fs_base64_decode(slot, payload)) {
-        slot->result = FS_RESULT_SUCCESS;
-        slot->ptr = slot->buf;
+    assert(chn < FS_CHANNEL_NUM);
+    fs_reset(chn);
+    fs_channel_state_t* channel = &state.channels[chn];
+    channel->path = fs_path_printf("%s", name);
+    if (fs_base64_decode(channel, payload)) {
+        channel->result = FS_RESULT_SUCCESS;
+        channel->ptr = channel->buf;
         return true;
     }
     else {
-        slot->result = FS_RESULT_FAILED;
+        channel->result = FS_RESULT_FAILED;
         return false;
     }
 }
 
 static void fs_fetch_callback(const sfetch_response_t* response) {
     assert(state.valid);
-    size_t slot_index = *(size_t*)response->user_data;
-    assert(slot_index < FS_NUM_SLOTS);
-    fs_slot_t* slot = &state.slots[slot_index];
+    fs_channel_t chn = *(fs_channel_t*)response->user_data;
+    assert(chn < FS_CHANNEL_NUM);
+    fs_channel_state_t* channel = &state.channels[chn];
     if (response->fetched) {
-        slot->result = FS_RESULT_SUCCESS;
-        slot->ptr = (uint8_t*)response->data.ptr;
-        slot->size = response->data.size;
-        assert(slot->size < sizeof(slot->buf));
+        channel->result = FS_RESULT_SUCCESS;
+        channel->ptr = (uint8_t*)response->data.ptr;
+        channel->size = response->data.size;
+        assert(channel->size < sizeof(channel->buf));
         // in case it's a text file, zero-terminate the data
-        slot->buf[slot->size] = 0;
+        channel->buf[channel->size] = 0;
     }
     else if (response->failed) {
-        slot->result = FS_RESULT_FAILED;
+        channel->result = FS_RESULT_FAILED;
     }
 }
 
 #if defined(__EMSCRIPTEN__)
+
+EM_JS_DEPS(chips_ini, "$UTF8ToString,$stringToNewUTF8");
+
+EM_JS(void, emsc_js_save_ini, (const char* c_key, const char* c_payload), {
+    if (window.localStorage === undefined) {
+        return;
+    }
+    const key = UTF8ToString(c_key);
+    const payload = UTF8ToString(c_payload);
+    window.localStorage.setItem(key, payload);
+});
+
+EM_JS(const char*, emsc_js_load_ini, (const char* c_key), {
+    if (window.localStorage === undefined) {
+        return 0;
+    }
+    const key = UTF8ToString(c_key);
+    const payload = window.localStorage.getItem(key);
+    if (payload) {
+        return stringToNewUTF8(payload);
+    } else {
+        return 0;
+    }
+});
+
 static void fs_emsc_dropped_file_callback(const sapp_html5_fetch_response* response) {
-    size_t slot_index = (size_t)(uintptr_t)response->user_data;
-    assert(slot_index < FS_NUM_SLOTS);
-    fs_slot_t* slot = &state.slots[slot_index];
+    fs_channel_t chn = (fs_channel_t)(uintptr_t)response->user_data;
+    assert(chn < FS_CHANNEL_NUM);
+    fs_channel_state_t* channel = &state.channels[chn];
     if (response->succeeded) {
-        slot->result = FS_RESULT_SUCCESS;
-        slot->ptr = (uint8_t*)response->data.ptr;
-        slot->size = response->data.size;
-        assert(slot->size < sizeof(slot->buf));
+        channel->result = FS_RESULT_SUCCESS;
+        channel->ptr = (uint8_t*)response->data.ptr;
+        channel->size = response->data.size;
+        assert(channel->size < sizeof(channel->buf));
         // in case it's a text file, zero-terminate the data
-        slot->buf[slot->size] = 0;
+        channel->buf[channel->size] = 0;
     }
     else {
-        slot->result = FS_RESULT_FAILED;
+        channel->result = FS_RESULT_FAILED;
     }
 }
-#endif
-
-void fs_start_load_file(size_t slot_index, const char* path) {
-    assert(state.valid);
-    assert(slot_index < FS_NUM_SLOTS);
-    fs_reset(slot_index);
-    fs_slot_t* slot = &state.slots[slot_index];
-    fs_path_append(&slot->path, path);
-    slot->result = FS_RESULT_PENDING;
-    sfetch_send(&(sfetch_request_t){
-        .path = path,
-        .channel = slot_index,
-        .callback = fs_fetch_callback,
-        .buffer = { .ptr = slot->buf, .size = FS_MAX_SIZE },
-        .user_data = { .ptr = &slot_index, .size = sizeof(slot_index) },
-    });
-}
-
-void fs_start_load_dropped_file(size_t slot_index) {
-    assert(state.valid);
-    assert(slot_index < FS_NUM_SLOTS);
-    fs_reset(slot_index);
-    fs_slot_t* slot = &state.slots[slot_index];
-    const char* path = sapp_get_dropped_file_path(0);
-    fs_path_append(&slot->path, path);
-    slot->result = FS_RESULT_PENDING;
-    #if defined(__EMSCRIPTEN__)
-        sapp_html5_fetch_dropped_file(&(sapp_html5_fetch_request){
-            .dropped_file_index = 0,
-            .callback = fs_emsc_dropped_file_callback,
-            .buffer = { .ptr = slot->buf, .size = FS_MAX_SIZE },
-            .user_data = (void*)(intptr_t)slot_index,
-        });
-    #else
-        fs_start_load_file(slot_index, path);
-    #endif
-}
-
-fs_result_t fs_result(size_t slot_index) {
-    assert(state.valid);
-    assert(slot_index < FS_NUM_SLOTS);
-    return state.slots[slot_index].result;
-}
-
-bool fs_success(size_t slot_index) {
-    return fs_result(slot_index) == FS_RESULT_SUCCESS;
-}
-
-bool fs_failed(size_t slot_index) {
-    return fs_result(slot_index) == FS_RESULT_FAILED;
-}
-
-bool fs_pending(size_t slot_index) {
-    return fs_result(slot_index) == FS_RESULT_PENDING;
-}
-
-gfx_range_t fs_data(size_t slot_index) {
-    assert(state.valid);
-    assert(slot_index < FS_NUM_SLOTS);
-    fs_slot_t* slot = &state.slots[slot_index];
-    if (slot->result == FS_RESULT_SUCCESS) {
-        return (gfx_range_t){ .ptr = slot->ptr, .size = slot->size };
-    }
-    else {
-        return (gfx_range_t){0};
-    }
-}
-
-fs_path_t fs_make_snapshot_path(const char* dir, const char* system_name, size_t snapshot_index) {
-    char buf[16];
-    snprintf(buf, sizeof(buf), "%zu", snapshot_index);
-    fs_path_t path = {0};
-    fs_path_append(&path, dir);
-    fs_path_append(&path, "/chips_");
-    fs_path_append(&path, system_name);
-    fs_path_append(&path, "_snapshot_");
-    fs_path_append(&path, buf);
-    return path;
-}
-
-#if !defined(__EMSCRIPTEN__)
-static void fs_snapshot_fetch_callback(const sfetch_response_t* response) {
-    const fs_snapshot_load_context_t* ctx = (fs_snapshot_load_context_t*) response->user_data;
-    size_t snapshot_index = ctx->snapshot_index;
-    fs_snapshot_load_callback_t callback = ctx->callback;
-    if (response->fetched) {
-        callback(&(fs_snapshot_response_t){
-            .snapshot_index = snapshot_index,
-            .result = FS_RESULT_SUCCESS,
-            .data = {
-                .ptr = (uint8_t*)response->data.ptr,
-                .size = response->data.size
-            }
-        });
-    }
-    else if (response->failed) {
-        callback(&(fs_snapshot_response_t){
-            .snapshot_index = snapshot_index,
-            .result = FS_RESULT_FAILED,
-        });
-    }
-}
-#endif
-
-#if defined (WIN32)
-fs_path_t fs_win32_make_snapshot_path_utf8(const char* system_name, size_t snapshot_index) {
-    WCHAR wc_tmp_path[1024];
-    if (0 == GetTempPathW(sizeof(wc_tmp_path), wc_tmp_path)) {
-        return (fs_path_t){0};
-    }
-    char utf8_tmp_path[2048];
-    if (0 == WideCharToMultiByte(CP_UTF8, 0, wc_tmp_path, -1, utf8_tmp_path, sizeof(utf8_tmp_path), NULL, NULL)) {
-        return (fs_path_t){0};
-    }
-    return fs_make_snapshot_path(utf8_tmp_path, system_name, snapshot_index);
-}
-
-bool fs_win32_make_snapshot_path_wide(const char* system_name, size_t snapshot_index, WCHAR* out_buf, size_t out_buf_size_bytes) {
-    const fs_path_t path = fs_win32_make_snapshot_path_utf8(system_name, snapshot_index);
-    if ((path.len == 0) || (path.clamped)) {
-        return false;
-    }
-    if (0 == MultiByteToWideChar(CP_UTF8, 0, path.cstr, -1, out_buf, out_buf_size_bytes)) {
-        return false;
-    }
-    return true;
-}
-
-bool fs_save_snapshot(const char* system_name, size_t snapshot_index, gfx_range_t data) {
-    WCHAR wc_path[1024];
-    if (!fs_win32_make_snapshot_path_wide(system_name, snapshot_index, wc_path, sizeof(wc_path)/sizeof(WCHAR))) {
-        return false;
-    }
-    HANDLE fp = CreateFileW(wc_path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (fp == INVALID_HANDLE_VALUE) {
-        return false;
-    }
-    if (!WriteFile(fp, data.ptr, data.size, NULL, NULL)) {
-        CloseHandle(fp);
-        return false;
-    }
-    CloseHandle(fp);
-    return true;
-}
-
-bool fs_start_load_snapshot(size_t slot_index, const char* system_name, size_t snapshot_index, fs_snapshot_load_callback_t callback) {
-    assert(slot_index < FS_NUM_SLOTS);
-    assert(system_name && callback);
-    fs_path_t path = fs_win32_make_snapshot_path_utf8(system_name, snapshot_index);
-    if ((path.len == 0) || path.clamped) {
-        return false;
-    }
-    fs_snapshot_load_context_t context = {
-        .snapshot_index = snapshot_index,
-        .callback = callback
-    };
-    fs_slot_t* slot = &state.slots[slot_index];
-    sfetch_send(&(sfetch_request_t){
-        .path = path.cstr,
-        .channel = slot_index,
-        .callback = fs_snapshot_fetch_callback,
-        .buffer = { .ptr = slot->buf, .size = FS_MAX_SIZE },
-        .user_data = { .ptr = &context, .size = sizeof(context) }
-    });
-    return true;
-}
-
-#elif defined(__EMSCRIPTEN__)
 
 EM_JS(void, fs_js_save_snapshot, (const char* system_name_cstr, int snapshot_index, void* bytes, int num_bytes), {
     const db_name = 'chips';
@@ -439,17 +323,17 @@ EM_JS(void, fs_js_save_snapshot, (const char* system_name_cstr, int snapshot_ind
     }
     open_request.onupgradeneeded = () => {
         console.log('fs_js_save_snapshot: creating db');
-        let db = open_request.result;
+        const db = open_request.result;
         db.createObjectStore(db_store_name);
     };
     open_request.onsuccess = () => {
         console.log('fs_js_save_snapshot: onsuccess');
-        let db = open_request.result;
-        let transaction = db.transaction([db_store_name], 'readwrite');
-        let file = transaction.objectStore(db_store_name);
-        let key = system_name + '_' + snapshot_index;
-        let blob = HEAPU8.subarray(bytes, bytes + num_bytes);
-        let put_request = file.put(blob, key);
+        const db = open_request.result;
+        const transaction = db.transaction([db_store_name], 'readwrite');
+        const file = transaction.objectStore(db_store_name);
+        const key = system_name + '_' + snapshot_index;
+        const blob = HEAPU8.subarray(bytes, bytes + num_bytes);
+        const put_request = file.put(blob, key);
         put_request.onsuccess = () => {
             console.log('fs_js_save_snapshot:', key, 'successfully stored')
         };
@@ -469,7 +353,6 @@ EM_JS(void, fs_js_load_snapshot, (const char* system_name_cstr, int snapshot_ind
     const db_name = 'chips';
     const db_store_name = 'store';
     const system_name = UTF8ToString(system_name_cstr);
-    console.log('fs_js_load_snapshot: called with', system_name, snapshot_index);
     let open_request;
     try {
         open_request = window.indexedDB.open(db_name, 1);
@@ -478,11 +361,11 @@ EM_JS(void, fs_js_load_snapshot, (const char* system_name_cstr, int snapshot_ind
     }
     open_request.onupgradeneeded = () => {
         console.log('fs_js_load_snapshot: creating db');
-        let db = open_request.result;
+        const db = open_request.result;
         db.createObjectStore(db_store_name);
     };
     open_request.onsuccess = () => {
-        let db = open_request.result;
+        const db = open_request.result;
         let transaction;
         try {
             transaction = db.transaction([db_store_name], 'readwrite');
@@ -490,18 +373,17 @@ EM_JS(void, fs_js_load_snapshot, (const char* system_name_cstr, int snapshot_ind
             console.log('fs_js_load_snapshot: db.transaction failed with', e);
             return;
         };
-        let file = transaction.objectStore(db_store_name);
-        let key = system_name + '_' + snapshot_index;
-        let get_request = file.get(key);
+        const file = transaction.objectStore(db_store_name);
+        const key = system_name + '_' + snapshot_index;
+        const get_request = file.get(key);
         get_request.onsuccess = () => {
             if (get_request.result !== undefined) {
-                let num_bytes = get_request.result.length;
+                const num_bytes = get_request.result.length;
                 console.log('fs_js_load_snapshot:', key, 'successfully loaded', num_bytes, 'bytes');
-                let ptr = _fs_emsc_alloc(num_bytes);
+                const ptr = _fs_emsc_alloc(num_bytes);
                 HEAPU8.set(get_request.result, ptr);
                 _fs_emsc_load_snapshot_callback(context, ptr, num_bytes);
             } else {
-                console.log('fs_js_load_snapshot:', key, 'does not exist');
                 _fs_emsc_load_snapshot_callback(context, 0, 0);
             }
         };
@@ -517,7 +399,7 @@ EM_JS(void, fs_js_load_snapshot, (const char* system_name_cstr, int snapshot_ind
     }
 });
 
-bool fs_save_snapshot(const char* system_name, size_t snapshot_index, gfx_range_t data) {
+bool fs_emsc_save_snapshot(const char* system_name, size_t snapshot_index, gfx_range_t data) {
     assert(system_name && data.ptr && data.size > 0);
     fs_js_save_snapshot(system_name, (int)snapshot_index, data.ptr, data.size);
     return true;
@@ -550,10 +432,8 @@ EMSCRIPTEN_KEEPALIVE void fs_emsc_load_snapshot_callback(const fs_snapshot_load_
     free((void*)ctx);
 }
 
-bool fs_start_load_snapshot(size_t slot_index, const char* system_name, size_t snapshot_index, fs_snapshot_load_callback_t callback) {
-    assert(slot_index < FS_NUM_SLOTS);
+bool fs_emsc_load_snapshot_async(const char* system_name, size_t snapshot_index, fs_snapshot_load_callback_t callback) {
     assert(system_name && callback);
-    (void)slot_index;
 
     // allocate a 'context' struct which needs to be tunneled through JS to the fs_emsc_load_snapshot_callback() function
     fs_snapshot_load_context_t* context = calloc(1, sizeof(fs_snapshot_load_context_t));
@@ -564,29 +444,139 @@ bool fs_start_load_snapshot(size_t slot_index, const char* system_name, size_t s
 
     return true;
 }
-#else // Apple or Linux
-
-bool fs_save_snapshot(const char* system_name, size_t snapshot_index, gfx_range_t data) {
-    assert(system_name && data.ptr && data.size > 0);
-    fs_path_t path = fs_make_snapshot_path("/tmp", system_name, snapshot_index);
-    if (path.clamped) {
-        return false;
+#else // any native platform
+static void fs_win32_posix_snapshot_fetch_callback(const sfetch_response_t* response) {
+    const fs_snapshot_load_context_t* ctx = (fs_snapshot_load_context_t*) response->user_data;
+    size_t snapshot_index = ctx->snapshot_index;
+    fs_snapshot_load_callback_t callback = ctx->callback;
+    if (response->fetched) {
+        callback(&(fs_snapshot_response_t){
+            .snapshot_index = snapshot_index,
+            .result = FS_RESULT_SUCCESS,
+            .data = {
+                .ptr = (uint8_t*)response->data.ptr,
+                .size = response->data.size
+            }
+        });
     }
-    FILE* fp = fopen(path.cstr, "wb");
-    if (fp) {
-        fwrite(data.ptr, data.size, 1, fp);
-        fclose(fp);
-        return true;
-    }
-    else {
-        return false;
+    else if (response->failed) {
+        callback(&(fs_snapshot_response_t){
+            .snapshot_index = snapshot_index,
+            .result = FS_RESULT_FAILED,
+        });
     }
 }
 
-bool fs_start_load_snapshot(size_t slot_index, const char* system_name, size_t snapshot_index, fs_snapshot_load_callback_t callback) {
-    assert(slot_index < FS_NUM_SLOTS);
+static bool fs_win32_posix_write_file(fs_path_t path, gfx_range_t data) {
+    if (path.clamped) {
+        return false;
+    }
+    #if defined(WIN32)
+        WCHAR wc_path[FS_PATH_SIZE];
+        if (!fs_win32_path_to_wide(&path, wc_path, sizeof(wc_path))) {
+            return false;
+        }
+        HANDLE fp = CreateFileW(wc_path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (fp == INVALID_HANDLE_VALUE) {
+            return false;
+        }
+        if (!WriteFile(fp, data.ptr, data.size, NULL, NULL)) {
+            CloseHandle(fp);
+            return false;
+        }
+        CloseHandle(fp);
+    #else
+        FILE* fp = fopen(path.cstr, "wb");
+        if (!fp) {
+            return false;
+        }
+        fwrite(data.ptr, data.size, 1, fp);
+        fclose(fp);
+    #endif
+    return true;
+}
+
+// NOTE: free the returned range.ptr with free(ptr)
+static gfx_range_t fs_win32_posix_read_file(fs_path_t path, bool null_terminated) {
+    if (path.clamped) {
+        return (gfx_range_t){0};
+    }
+    #if defined(WIN32)
+        WCHAR wc_path[FS_PATH_SIZE];
+        if (!fs_win32_path_to_wide(&path, wc_path, sizeof(wc_path))) {
+            return (gfx_range_t){0};
+        }
+        HANDLE fp = CreateFileW(wc_path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (fp == INVALID_HANDLE_VALUE) {
+            return (gfx_range_t){0};
+        }
+        size_t file_size = GetFileSize(fp, NULL);
+        size_t alloc_size = null_terminated ? file_size + 1 : file_size;
+        void* ptr = calloc(1, alloc_size);
+        DWORD read_bytes = 0;
+        BOOL read_res = ReadFile(fp, ptr, file_size, &read_bytes, NULL);
+        CloseHandle(fp);
+        if (read_res && read_bytes == file_size) {
+            return (gfx_range_t){ .ptr = ptr, .size = alloc_size };
+        } else {
+            free(ptr);
+            return (gfx_range_t){0};
+        }
+    #else
+        FILE* fp = fopen(path.cstr, "rb");
+        if (!fp) {
+            return (gfx_range_t){0};
+        }
+        fseek(fp, 0, SEEK_END);
+        size_t file_size = ftell(fp);
+        fseek(fp, 0, SEEK_SET);
+        size_t alloc_size = null_terminated ? file_size + 1 : file_size;
+        void* ptr = calloc(1, alloc_size);
+        size_t bytes_read = fread(ptr, 1, file_size, fp);
+        fclose(fp);
+        if (bytes_read == file_size) {
+            return (gfx_range_t){ .ptr = ptr, .size = alloc_size };
+        } else {
+            free(ptr);
+            return (gfx_range_t){0};
+        }
+    #endif
+}
+
+static fs_path_t fs_win32_posix_tmp_dir(void) {
+    #if defined(WIN32)
+    WCHAR wc_tmp_path[FS_PATH_SIZE];
+    if (0 == GetTempPathW(sizeof(wc_tmp_path) / sizeof(WCHAR), wc_tmp_path)) {
+        return (fs_path_t){0};
+    }
+    char utf8_tmp_path[FS_PATH_SIZE];
+    if (0 == WideCharToMultiByte(CP_UTF8, 0, wc_tmp_path, -1, utf8_tmp_path, sizeof(utf8_tmp_path), NULL, NULL)) {
+        return (fs_path_t){0};
+    }
+    return fs_path_printf("%s", utf8_tmp_path);
+    #else
+    return fs_path_printf("%s", "/tmp");
+    #endif
+}
+
+fs_path_t fs_win32_posix_make_snapshot_path(const char* system_name, size_t snapshot_index) {
+    fs_path_t tmp_dir = fs_win32_posix_tmp_dir();
+    return fs_path_printf("%s/chips_%s_snapshot_%zu", tmp_dir.cstr, system_name, snapshot_index);
+}
+
+fs_path_t fs_win32_posix_make_ini_path(const char* key) {
+    fs_path_t tmp_dir = fs_win32_posix_tmp_dir();
+    return fs_path_printf("%s/%s_imgui.ini", tmp_dir.cstr, key);
+}
+
+bool fs_win32_posix_save_snapshot(const char* system_name, size_t snapshot_index, gfx_range_t data) {
+    fs_path_t path = fs_win32_posix_make_snapshot_path(system_name, snapshot_index);
+    return fs_win32_posix_write_file(path, data);
+}
+
+bool fs_win32_posix_load_snapshot_async(const char* system_name, size_t snapshot_index, fs_snapshot_load_callback_t callback) {
     assert(system_name && callback);
-    fs_path_t path = fs_make_snapshot_path("/tmp", system_name, snapshot_index);
+    fs_path_t path = fs_win32_posix_make_snapshot_path(system_name, snapshot_index);
     if (path.clamped) {
         return false;
     }
@@ -594,14 +584,96 @@ bool fs_start_load_snapshot(size_t slot_index, const char* system_name, size_t s
         .snapshot_index = snapshot_index,
         .callback = callback
     };
-    fs_slot_t* slot = &state.slots[slot_index];
+    const fs_channel_t chn = FS_CHANNEL_SNAPSHOTS;
+    fs_channel_state_t* channel = &state.channels[chn];
     sfetch_send(&(sfetch_request_t){
         .path = path.cstr,
-        .channel = slot_index,
-        .callback = fs_snapshot_fetch_callback,
-        .buffer = { .ptr = slot->buf, .size = FS_MAX_SIZE },
+        .channel = (int)chn,
+        .callback = fs_win32_posix_snapshot_fetch_callback,
+        .buffer = { .ptr = channel->buf, .size = FS_MAX_SIZE },
         .user_data = { .ptr = &context, .size = sizeof(context) }
     });
     return true;
 }
 #endif
+
+void fs_load_file_async(fs_channel_t chn, const char* path) {
+    assert(state.valid);
+    assert(chn < FS_CHANNEL_NUM);
+    fs_reset(chn);
+    fs_channel_state_t* channel = &state.channels[chn];
+    channel->path = fs_path_printf("%s", path);
+    channel->result = FS_RESULT_PENDING;
+    sfetch_send(&(sfetch_request_t){
+        .path = path,
+        .channel = chn,
+        .callback = fs_fetch_callback,
+        .buffer = { .ptr = channel->buf, .size = FS_MAX_SIZE },
+        .user_data = { .ptr = &chn, .size = sizeof(chn) },
+    });
+}
+
+void fs_load_dropped_file_async(fs_channel_t chn) {
+    assert(state.valid);
+    assert(chn < FS_CHANNEL_NUM);
+    fs_reset(chn);
+    fs_channel_state_t* channel = &state.channels[chn];
+    const char* path = sapp_get_dropped_file_path(0);
+    channel->path = fs_path_printf("%s", path);
+    channel->result = FS_RESULT_PENDING;
+    #if defined(__EMSCRIPTEN__)
+        sapp_html5_fetch_dropped_file(&(sapp_html5_fetch_request){
+            .dropped_file_index = 0,
+            .callback = fs_emsc_dropped_file_callback,
+            .buffer = { .ptr = channel->buf, .size = FS_MAX_SIZE },
+            .user_data = (void*)(intptr_t)chn,
+        });
+    #else
+        fs_load_file_async(chn, path);
+    #endif
+}
+
+bool fs_save_snapshot(const char* system_name, size_t snapshot_index, gfx_range_t data) {
+    #if defined(__EMSCRIPTEN__)
+    return fs_emsc_save_snapshot(system_name, snapshot_index, data);
+    #else
+    return fs_win32_posix_save_snapshot(system_name, snapshot_index, data);
+    #endif
+}
+
+bool fs_load_snapshot_async(const char* system_name, size_t snapshot_index, fs_snapshot_load_callback_t callback) {
+    #if defined(__EMSCRIPTEN__)
+    return fs_emsc_load_snapshot_async(system_name, snapshot_index, callback);
+    #else
+    return fs_win32_posix_load_snapshot_async(system_name, snapshot_index, callback);
+    #endif
+}
+
+void fs_save_ini(const char* key, const char* payload) {
+    assert(key && payload);
+    #if defined(__EMSCRIPTEN__)
+    emsc_js_save_ini(key, payload);
+    #else
+    fs_path_t path = fs_win32_posix_make_ini_path(key);
+    gfx_range_t data = { .ptr = (void*)payload, .size = strlen(payload) };
+    fs_win32_posix_write_file(path, data);
+    #endif
+}
+
+const char* fs_load_ini(const char* key) {
+    assert(key);
+    #if defined(__EMSCRIPTEN__)
+    return emsc_js_load_ini(key);
+    #else
+    fs_path_t path = fs_win32_posix_make_ini_path(key);
+    gfx_range_t data = fs_win32_posix_read_file(path, true);
+    return data.ptr;
+    #endif
+}
+
+void fs_free_ini(const char* payload_or_null) {
+    if (payload_or_null) {
+        void* payload = (void*)payload_or_null;
+        free(payload);
+    }
+}

@@ -30,7 +30,7 @@ fips_end_lib()
 # optional UI library (using Dear ImGui)
 fips_begin_lib(ui)
     fips_files(ui.cc ui.h)
-    fips_deps(imgui)
+    fips_deps(imgui-docking)
 fips_end_lib()
 
 # optional miniz library

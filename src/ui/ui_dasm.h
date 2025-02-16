@@ -106,6 +106,8 @@ typedef struct {
 void ui_dasm_init(ui_dasm_t* win, const ui_dasm_desc_t* desc);
 void ui_dasm_discard(ui_dasm_t* win);
 void ui_dasm_draw(ui_dasm_t* win);
+void ui_dasm_save_settings(ui_dasm_t* win, ui_settings_t* settings);
+void ui_dasm_load_settings(ui_dasm_t* ui, const ui_settings_t* settings);
 
 #ifdef __cplusplus
 } /* extern "C" */
@@ -368,13 +370,23 @@ void ui_dasm_draw(ui_dasm_t* win) {
     if (!win->open) {
         return;
     }
-    ImGui::SetNextWindowPos(ImVec2(win->init_x, win->init_y), ImGuiCond_Once);
-    ImGui::SetNextWindowSize(ImVec2(win->init_w, win->init_h), ImGuiCond_Once);
+    ImGui::SetNextWindowPos(ImVec2(win->init_x, win->init_y), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(win->init_w, win->init_h), ImGuiCond_FirstUseEver);
     if (ImGui::Begin(win->title, &win->open)) {
         _ui_dasm_draw_stack(win);
         ImGui::SameLine();
         _ui_dasm_draw_disasm(win);
     }
     ImGui::End();
+}
+
+void ui_dasm_save_settings(ui_dasm_t* win, ui_settings_t* settings) {
+    CHIPS_ASSERT(win && settings);
+    ui_settings_add(settings, win->title, win->open);
+}
+
+void ui_dasm_load_settings(ui_dasm_t* win, const ui_settings_t* settings) {
+    CHIPS_ASSERT(win && settings);
+    win->open = ui_settings_isopen(settings, win->title);
 }
 #endif /* GAME_UI_IMPL */

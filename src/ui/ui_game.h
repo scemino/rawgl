@@ -121,6 +121,8 @@ void ui_game_init(ui_game_t* ui, const ui_game_desc_t* desc);
 void ui_game_discard(ui_game_t* ui);
 void ui_game_draw(ui_game_t* ui);
 game_debug_t ui_game_get_debug(ui_game_t* ui);
+void ui_game_save_settings(ui_game_t* ui, ui_settings_t* settings);
+void ui_game_load_settings(ui_game_t* ui, const ui_settings_t* settings);
 
 #ifdef __cplusplus
 } /* extern "C" */
@@ -214,8 +216,8 @@ static void _ui_game_draw_vm(ui_game_t* ui) {
     };
     const int var_names_size = sizeof(var_names) / sizeof(var_names[0]);
 
-    ImGui::SetNextWindowPos(ImVec2((float)ui->vm.x, (float)ui->vm.y), ImGuiCond_Once);
-    ImGui::SetNextWindowSize(ImVec2((float)ui->vm.w, (float)ui->vm.h), ImGuiCond_Once);
+    ImGui::SetNextWindowPos(ImVec2((float)ui->vm.x, (float)ui->vm.y), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2((float)ui->vm.w, (float)ui->vm.h), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Virtual machine", &ui->vm.open)) {
         if (ImGui::CollapsingHeader("Variables", ImGuiTreeNodeFlags_DefaultOpen)) {
             char tmp[16];
@@ -697,8 +699,8 @@ static void _ui_game_draw_resources(ui_game_t* ui) {
      if (!ui->res.open) {
         return;
     }
-    ImGui::SetNextWindowPos(ImVec2((float)ui->res.x, (float)ui->res.y), ImGuiCond_Once);
-    ImGui::SetNextWindowSize(ImVec2((float)ui->res.w, (float)ui->res.h), ImGuiCond_Once);
+    ImGui::SetNextWindowPos(ImVec2((float)ui->res.x, (float)ui->res.y), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2((float)ui->res.w, (float)ui->res.h), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Resources", &ui->res.open)) {
 
         static const char* labels[] = {"Sound", "Music", "Bitmap", "Palette", "Byte code", "Shape", "Bank" };
@@ -765,8 +767,8 @@ static void _ui_game_draw_video(ui_game_t* ui) {
     if (!ui->video.open) {
         return;
     }
-    ImGui::SetNextWindowPos(ImVec2((float)ui->video.x, (float)ui->video.y), ImGuiCond_Once);
-    ImGui::SetNextWindowSize(ImVec2((float)ui->video.w, (float)ui->video.h), ImGuiCond_Once);
+    ImGui::SetNextWindowPos(ImVec2((float)ui->video.x, (float)ui->video.y), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2((float)ui->video.w, (float)ui->video.h), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Video", &ui->video.open)) {
         if (ImGui::CollapsingHeader("Palette", ImGuiTreeNodeFlags_DefaultOpen)) {
             for (int col = 0; col < 16; col++) {
@@ -934,6 +936,28 @@ game_debug_t ui_game_get_debug(ui_game_t* ui) {
     res.callback.user_data = &ui->dbg;
     res.stopped = &ui->dbg.dbg.stopped;
     return res;
+}
+
+void ui_game_save_settings(ui_game_t* ui, ui_settings_t* settings) {
+    GAME_ASSERT(ui && settings);
+    for (int i = 0; i < 4; i++) {
+        ui_dasm_save_settings(&ui->dasm[i], settings);
+    }
+    ui_dbg_save_settings(&ui->dbg, settings);
+    ui_settings_add(settings, "Video", ui->video.open);
+    ui_settings_add(settings, "Resources", ui->res.open);
+    ui_settings_add(settings, "Virtual machine", ui->vm.open);
+}
+
+void ui_game_load_settings(ui_game_t* ui, const ui_settings_t* settings) {
+    GAME_ASSERT(ui && settings);
+    for (int i = 0; i < 4; i++) {
+        ui_dasm_load_settings(&ui->dasm[i], settings);
+    }
+    ui_dbg_load_settings(&ui->dbg, settings);
+    ui->video.open = ui_settings_isopen(settings, "Video");
+    ui->res.open = ui_settings_isopen(settings, "Resources");
+    ui->vm.open = ui_settings_isopen(settings, "Virtual machine");
 }
 
 #ifdef __clang__

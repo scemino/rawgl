@@ -68,6 +68,10 @@ static void ui_draw_cb(void) {
     ui_game_draw(&state.ui);
 }
 
+static void ui_save_settings_cb(ui_settings_t* settings) {
+    ui_game_save_settings(&state.ui, settings);
+}
+
 static void ui_update_snapshot_screenshot(size_t slot) {
     ui_snapshot_screenshot_t screenshot = {
         .texture = ui_create_screenshot_texture(game_display_info(&state.snapshots[slot].game))
@@ -147,7 +151,11 @@ static void app_init(void) {
         .logger.func = slog_func,
     });
     #ifdef GAME_USE_UI
-        ui_init(ui_draw_cb);
+        ui_init(&(ui_desc_t){
+            .draw_cb = ui_draw_cb,
+            .save_settings_cb = ui_save_settings_cb,
+            .imgui_ini_key = "scemino.rawgl",
+        });
         ui_game_init(&state.ui, &(ui_game_desc_t){
             .game = &state.game,
             .dbg_texture = {
@@ -170,10 +178,11 @@ static void app_init(void) {
                 .toggle_breakpoint = { .keycode = simgui_map_keycode(SAPP_KEYCODE_F9), .name = "F9" }
             }
         });
+        ui_game_load_settings(&state.ui, ui_settings());
     #endif
 
     if (sargs_exists("file")) {
-        fs_start_load_file(FS_SLOT_IMAGE, sargs_value("file"));
+        fs_load_file_async(FS_CHANNEL_IMAGES, sargs_value("file"));
     }
 }
 
@@ -240,11 +249,11 @@ bool _game_load_data(gfx_range_t data) {
 static void handle_file_loading(void) {
     fs_dowork();
     const uint32_t load_delay_frames = 120;
-    if (fs_success(FS_SLOT_IMAGE) && clock_frame_count_60hz() > load_delay_frames) {
+    if (fs_success(FS_CHANNEL_IMAGES) && clock_frame_count_60hz() > load_delay_frames) {
 
         bool load_success = false;
-        if (fs_ext(FS_SLOT_IMAGE, "zip")) {
-            load_success = _game_load_data(fs_data(FS_SLOT_IMAGE));
+        if (fs_ext(FS_CHANNEL_IMAGES, "zip")) {
+            load_success = _game_load_data(fs_data(FS_CHANNEL_IMAGES));
         }
         if (load_success) {
             state.ready = true;
@@ -256,7 +265,7 @@ static void handle_file_loading(void) {
         else {
             gfx_flash_error();
         }
-        fs_reset(FS_SLOT_IMAGE);
+        fs_reset(FS_CHANNEL_IMAGES);
     }
 }
 
@@ -283,7 +292,7 @@ static void app_cleanup(void) {
 void app_input(const sapp_event* event) {
      // accept dropped files also when ImGui grabs input
     if (event->type == SAPP_EVENTTYPE_FILES_DROPPED) {
-        fs_start_load_dropped_file(FS_SLOT_IMAGE);
+        fs_load_dropped_file_async(FS_CHANNEL_IMAGES);
     }
 #ifdef GAME_USE_UI
     if (ui_input(event)) {

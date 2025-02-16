@@ -3,13 +3,23 @@
 #include "sokol_gfx.h"
 #include "sokol_imgui.h"
 #include "gfx.h"
+#include "ui_settings.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 typedef void(*ui_draw_t)(void);
-void ui_init(ui_draw_t draw_cb);
+typedef void (*ui_save_settings_t)(ui_settings_t* settings);
+
+typedef struct {
+	ui_draw_t draw_cb;
+	ui_save_settings_t save_settings_cb;
+	const char* imgui_ini_key;
+} ui_desc_t;
+
+void ui_init(const ui_desc_t* desc);
+const ui_settings_t* ui_settings(void);
 void ui_discard(void);
 void ui_draw(void);
 bool ui_input(const sapp_event* event);
