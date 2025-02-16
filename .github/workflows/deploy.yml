@@ -17,7 +17,7 @@ jobs:
           python3 fips set local on
           python3 fips webpage build
       - name: upload-artifact
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@main
         with:
           name: webpage
 
@@ -27,11 +27,11 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@main
         with:
           repository: scemino/raw_wp
           ssh-key: ${{ secrets.SSH_PRIVATE_KEY }}
-      - uses: actions/download-artifact@v2
+      - uses: actions/download-artifact@main
         with:
           name: webpage
       - name: "commit and push"
