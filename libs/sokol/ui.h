@@ -4,12 +4,17 @@
 #include "sokol_imgui.h"
 #include "gfx.h"
 #include "ui_settings.h"
+#include "ui_display.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-typedef void(*ui_draw_t)(void);
+typedef struct {
+	ui_display_frame_t display;
+} ui_draw_info_t;
+
+typedef void(*ui_draw_t)(const ui_draw_info_t* draw_info);
 typedef void (*ui_save_settings_t)(ui_settings_t* settings);
 
 typedef struct {
@@ -21,7 +26,7 @@ typedef struct {
 void ui_init(const ui_desc_t* desc);
 const ui_settings_t* ui_settings(void);
 void ui_discard(void);
-void ui_draw(void);
+void ui_draw(const gfx_draw_info_t* draw_info);
 bool ui_input(const sapp_event* event);
 ui_texture_t ui_create_texture(int w, int h);
 void ui_update_texture(ui_texture_t h, void* data, int data_byte_size);

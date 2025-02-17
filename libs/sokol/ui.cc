@@ -116,14 +116,23 @@ void ui_discard(void) {
     simgui_shutdown();
 }
 
-void ui_draw(void) {
+void ui_draw(const gfx_draw_info_t* gfx_draw_info) {
     handle_save_imgui_ini();
     simgui_new_frame({sapp_width(), sapp_height(), sapp_frame_duration(), sapp_dpi_scale() });
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     const ImGuiID dockspace = ImGui::GetID("main_dockspace");
     ImGui::DockSpaceOverViewport(dockspace, viewport, ImGuiDockNodeFlags_PassthruCentralNode);
     if (state.draw_cb) {
-        state.draw_cb();
+        ui_draw_info_t ui_draw_info = {};
+        if (gfx_draw_info) {
+            ui_draw_info.display.tex = simgui_imtextureid_with_sampler(gfx_draw_info->display_image, gfx_draw_info->display_sampler);
+            ui_draw_info.display.dim = gfx_draw_info->display_info.frame.dim;
+            ui_draw_info.display.screen = gfx_draw_info->display_info.screen;
+            ui_draw_info.display.pixel_aspect = gfx_pixel_aspect();
+            ui_draw_info.display.portrait = gfx_draw_info->display_info.portrait;
+            ui_draw_info.display.origin_top_left = sg_query_features().origin_top_left;
+        }
+        state.draw_cb(&ui_draw_info);
     }
     simgui_render();
 }

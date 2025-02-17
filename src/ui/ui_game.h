@@ -110,6 +110,7 @@ typedef struct {
 typedef struct {
     game_t* game;
     ui_game_video_t video;
+    ui_display_t display;
     ui_game_res_t res;
     ui_game_vm_t vm;
     ui_dbg_t dbg;
@@ -117,9 +118,13 @@ typedef struct {
     ui_dasm_t dasm[4];
 } ui_game_t;
 
+typedef struct {
+    ui_display_frame_t display;
+} ui_game_frame_t;
+
 void ui_game_init(ui_game_t* ui, const ui_game_desc_t* desc);
 void ui_game_discard(ui_game_t* ui);
-void ui_game_draw(ui_game_t* ui);
+void ui_game_draw(ui_game_t* ui, const ui_game_frame_t* frame);
 game_debug_t ui_game_get_debug(ui_game_t* ui);
 void ui_game_save_settings(ui_game_t* ui, ui_settings_t* settings);
 void ui_game_load_settings(ui_game_t* ui, const ui_settings_t* settings);
@@ -167,6 +172,7 @@ static void _ui_game_draw_menu(ui_game_t* ui) {
             ImGui::MenuItem("Video Hardware", 0, &ui->video.open);
             ImGui::MenuItem("Resource", 0, &ui->res.open);
             ImGui::MenuItem("Virtual machine", 0, &ui->vm.open);
+            ImGui::MenuItem("Display", 0, &ui->display.open);
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Debug")) {
@@ -897,6 +903,15 @@ void ui_game_init(ui_game_t* ui, const ui_game_desc_t* ui_desc) {
         ui->vm.w = 562;
         ui->vm.h = 568;
     }
+    {
+        ui_display_desc_t desc = {0};
+        desc.title = "Display";
+        desc.x = x;
+        desc.y = y;
+        desc.w = GAME_WIDTH + 20;
+        desc.h = GAME_HEIGHT + 20;
+        ui_display_init(&ui->display, &desc);
+    }
     ui->res.tex_bmp = ui->video.texture_cbs.create_cb(GAME_WIDTH, GAME_HEIGHT);
     ui->res.tex_fb = ui->video.texture_cbs.create_cb(GAME_WIDTH, GAME_HEIGHT);
 }
@@ -913,10 +928,11 @@ void ui_game_discard(ui_game_t* ui) {
     }
     ui_dasm_discard(&ui->res.data.code.dasm);
     ui_dbg_discard(&ui->dbg);
+    ui_display_discard(&ui->display);
     ui->game = 0;
 }
 
-void ui_game_draw(ui_game_t* ui) {
+void ui_game_draw(ui_game_t* ui, const ui_game_frame_t* frame) {
     GAME_ASSERT(ui && ui->game);
     _ui_game_draw_menu(ui);
     _ui_game_draw_resources(ui);
@@ -927,6 +943,7 @@ void ui_game_draw(ui_game_t* ui) {
     }
     ui_dasm_draw(&ui->res.data.code.dasm);
     ui_dbg_draw(&ui->dbg);
+    ui_display_draw(&ui->display, &frame->display);
 }
 
 game_debug_t ui_game_get_debug(ui_game_t* ui) {
@@ -947,6 +964,7 @@ void ui_game_save_settings(ui_game_t* ui, ui_settings_t* settings) {
     ui_settings_add(settings, "Video", ui->video.open);
     ui_settings_add(settings, "Resources", ui->res.open);
     ui_settings_add(settings, "Virtual machine", ui->vm.open);
+    ui_settings_add(settings, "Display", ui->display.open);
 }
 
 void ui_game_load_settings(ui_game_t* ui, const ui_settings_t* settings) {
@@ -958,6 +976,7 @@ void ui_game_load_settings(ui_game_t* ui, const ui_settings_t* settings) {
     ui->video.open = ui_settings_isopen(settings, "Video");
     ui->res.open = ui_settings_isopen(settings, "Resources");
     ui->vm.open = ui_settings_isopen(settings, "Virtual machine");
+    ui->display.open = ui_settings_isopen(settings, "Display");
 }
 
 #ifdef __clang__

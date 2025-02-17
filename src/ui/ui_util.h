@@ -69,6 +69,8 @@ void ui_util_b32(const char* label, uint32_t val);
 uint32_t ui_util_color(int imgui_color);
 /* inject the common options menu */
 void ui_util_options_menu(void);
+// check if window open state has changed and call ImGui::MarkIniSettingsDirty() if needed
+void ui_util_handle_window_open_dirty(const bool* cur_open, bool* last_open);
 
 #ifdef __cplusplus
 } /* extern "C" */
@@ -190,6 +192,14 @@ void ui_util_options_menu(void) {
         ImGui::EndMenu();
     }
     ImGui::SameLine(ImGui::GetWindowWidth() - 120);
+}
+
+void ui_util_handle_window_open_dirty(const bool* cur_open, bool* last_open) {
+    GAME_ASSERT(cur_open && last_open);
+    if (*cur_open != *last_open) {
+        *last_open = *cur_open;
+        ImGui::MarkIniSettingsDirty();
+    }
 }
 
 #ifdef _MSC_VER

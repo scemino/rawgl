@@ -39,7 +39,7 @@ typedef struct {
     int flash_success_count;
     int flash_error_count;
     sg_image empty_snapshot_texture;
-    void (*draw_extra_cb)(void);
+    void (*draw_extra_cb)(const gfx_draw_info_t* draw_info);
 } gfx_state_t;
 static gfx_state_t state;
 
@@ -67,6 +67,11 @@ static const float gfx_verts_flipped_rot[] = {
     0.0f, 1.0f, 0.0f, 1.0f,
     1.0f, 1.0f, 0.0f, 0.0f
 };
+
+gfx_dim_t gfx_pixel_aspect(void) {
+    assert(state.valid);
+    return state.offscreen.pixel_aspect;
+}
 
 sg_image gfx_create_icon_texture(const uint8_t* packed_pixels, int width, int height, int stride) {
     // textures must be 2^n for WebGL
@@ -389,7 +394,11 @@ void gfx_draw(gfx_display_info_t display_info) {
     sg_apply_viewport(0, 0, display.width, display.height, true);
     sgl_draw();
     if (state.draw_extra_cb) {
-        state.draw_extra_cb();
+        state.draw_extra_cb(&(gfx_draw_info_t){
+            .display_image = state.offscreen.img,
+            .display_sampler = state.offscreen.smp,
+            .display_info = display_info,
+        });
     }
     sg_end_pass();
     sg_commit();

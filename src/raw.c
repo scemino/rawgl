@@ -26,6 +26,7 @@
     #include "ui/ui_dasm.h"
     #include "ui/ui_dbg.h"
     #include "ui/ui_snapshot.h"
+    #include "ui_display.h"
     #include "ui/ui_game.h"
 #endif
 
@@ -54,7 +55,7 @@ static struct {
 } state = {0};
 
 #ifdef GAME_USE_UI
-static void ui_draw_cb(void);
+static void ui_draw_cb(const ui_draw_info_t* draw_info);
 #endif
 
 // audio-streaming callback
@@ -64,8 +65,10 @@ static void push_audio(const float* samples, int num_samples, void* user_data) {
 }
 
 #if defined(GAME_USE_UI)
-static void ui_draw_cb(void) {
-    ui_game_draw(&state.ui);
+static void ui_draw_cb(const ui_draw_info_t* draw_info) {
+    ui_game_draw(&state.ui, &(ui_game_frame_t){
+        .display = draw_info->display,
+    });
 }
 
 static void ui_save_settings_cb(ui_settings_t* settings) {

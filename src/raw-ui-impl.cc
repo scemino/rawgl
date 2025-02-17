@@ -8,10 +8,12 @@
 #include "game.h"
 #define GAME_UI_IMPL
 #include "imgui.h"
+#include "imgui_internal.h"
 #include "ui/ui_util.h"
 #include "ui/raw_dasm.h"
 #include "ui_settings.h"
 #include "ui/ui_dbg.h"
 #include "ui/ui_dasm.h"
 #include "ui/ui_snapshot.h"
+#include "ui_display.h"
 #include "ui/ui_game.h"
