@@ -794,7 +794,7 @@ static void _ui_game_draw_video(ui_game_t* ui) {
             ImGui::Text("Current page: %d", ui->game->video.buffers[0]);
             _ui_game_update_fbs(ui);
             for(int i=0; i<4; i++) {
-                const ImVec4 border_color = ui->game->video.buffers[0] == i ? ImGui::ColorConvertU32ToFloat4(0xFF30FF30) : ImVec4(0, 0, 0, 0);
+                const ImVec4 border_color = ui->game->video.buffers[0] == i ? ImGui::ColorConvertU32ToFloat4(0xFF30FF30) : ImVec4(0, 0, 0, 1);
                 ImGui::Image(ui->video.tex_fb[i], ImVec2(GAME_WIDTH, GAME_HEIGHT), ImVec2(0, 0), ImVec2(1, 1), ImVec4(1, 1, 1, 1), border_color);
                 if (i != 1) {
                     ImGui::SameLine();
