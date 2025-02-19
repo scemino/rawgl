@@ -788,8 +788,8 @@ static void _ui_game_draw_video(ui_game_t* ui) {
                     ImGui::SameLine();
                 }
             }
+            ImGui::NewLine();
         }
-        ImGui::NewLine();
         if (ImGui::CollapsingHeader("Frame buffers", ImGuiTreeNodeFlags_DefaultOpen)) {
             ImGui::Text("Current page: %d", ui->game->video.buffers[0]);
             _ui_game_update_fbs(ui);
