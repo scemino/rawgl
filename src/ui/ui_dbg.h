@@ -449,7 +449,7 @@ static void _ui_dbg_history_draw(ui_dbg_t* win) {
             }
 
             /* disassembled instruction */
-            x += glyph_width * 4;
+            x += glyph_width * 6;
             ImGui::SameLine(x);
             ImGui::Text("%s", win->dasm.str_buf);
         }
