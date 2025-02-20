@@ -166,6 +166,20 @@ static void _ui_game_draw_menu(ui_game_t* ui) {
     if (ImGui::BeginMainMenuBar()) {
         if (ImGui::BeginMenu("System")) {
             ui_snapshot_menus(&ui->snapshot);
+            if (ImGui::BeginMenu("Select Part")) {
+                const int parts[] = {GAME_PART_INTRO, GAME_PART_WATER, GAME_PART_PRISON, GAME_PART_CITE, GAME_PART_ARENE, GAME_PART_LUXE, GAME_PART_FINAL, GAME_PART_PASSWORD, GAME_PART_COPY_PROTECTION};
+                const char* part_names[] = {"Intro", "Water", "Prison", "Cite", "Arene", "Luxe", "Final", "Password", "Copy Protection"};
+                const int selected_part = game_get_selected_part(ui->game);
+                for(int i=0; i<9; i++) {
+                    bool selected = parts[i] == selected_part;
+                    if(!game_part_exists(ui->game, parts[i]))
+                        continue;
+                    if(ImGui::MenuItem(part_names[i], 0, &selected)) {
+                        game_select_part(ui->game, parts[i]);
+                    }
+                }
+                ImGui::EndMenu();
+            }
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Info")) {

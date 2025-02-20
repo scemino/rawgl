@@ -365,6 +365,9 @@ void game_key_up(game_t* game, game_input_t input);
 void game_char_pressed(game_t* game, int c);
 bool game_get_res_buf(game_t* game, int id, uint8_t* dst);
 void game_start(game_t* game, game_data_t data);
+void game_select_part(game_t* game, int part);
+int game_get_selected_part(const game_t* game);
+bool game_part_exists(const game_t* game, int part);
 
 void game_audio_callback_snapshot_onsave(game_audio_callback_t* snapshot);
 void game_audio_callback_snapshot_onload(game_audio_callback_t* snapshot, game_audio_callback_t* sys);
@@ -3385,6 +3388,14 @@ void game_start(game_t* game, game_data_t data) {
     game->title = _game_res_get_game_title(game);
 }
 
+void game_select_part(game_t* game, int part) {
+    _game_vm_restart_at(game, part, -1);
+}
+
+int game_get_selected_part(const game_t* game) {
+    return game->res.current_part;
+}
+
 void game_exec(game_t* game, uint32_t ms) {
     GAME_ASSERT(game && game->valid);
     game->elapsed += ms;
@@ -3547,6 +3558,25 @@ const char* game_get_string(game_t* game, uint16_t id) {
      }
    }
    return "???";
+}
+
+bool game_part_exists(const game_t* game, int part) {
+    if (part >= 16000 && part <= 16009) {
+        uint16_t id = part - 16000;
+        uint8_t ipal = _mem_list_parts[id][0];
+        uint8_t icod = _mem_list_parts[id][1];
+        uint8_t ivd1 = _mem_list_parts[id][2];
+        uint8_t ivd2 = _mem_list_parts[id][3];
+
+        if(!game->res.mem_list[ipal].bank_num || game->res.data.banks[game->res.mem_list[ipal].bank_num-1].size == 0 ||
+           !game->res.mem_list[icod].bank_num || game->res.data.banks[game->res.mem_list[icod].bank_num-1].size == 0 ||
+           !game->res.mem_list[ivd1].bank_num || game->res.data.banks[game->res.mem_list[ivd1].bank_num-1].size == 0 ||
+           !game->res.mem_list[ivd2].bank_num || game->res.data.banks[game->res.mem_list[ivd2].bank_num-1].size == 0)
+            return false;
+
+        return true;
+    }
+    return false;
 }
 
 #endif /* GAME_IMPL */
