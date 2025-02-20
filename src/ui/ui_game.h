@@ -98,7 +98,7 @@ typedef struct {
     int x, y;
     int w, h;
     bool open;
-} ui_game_vm_t;
+} ui_game_vars_t;
 
 typedef struct {
     int x, y;
@@ -118,7 +118,7 @@ typedef struct {
     ui_game_video_t video;
     ui_display_t display;
     ui_game_res_t res;
-    ui_game_vm_t vm;
+    ui_game_vars_t vars;
     ui_game_tasks_t tasks;
     ui_dbg_t dbg;
     ui_snapshot_t snapshot;
@@ -192,7 +192,7 @@ static void _ui_game_draw_menu(ui_game_t* ui) {
         if (ImGui::BeginMenu("Info")) {
             ImGui::MenuItem("Video Hardware", 0, &ui->video.open);
             ImGui::MenuItem("Resource", 0, &ui->res.open);
-            ImGui::MenuItem("Virtual machine", 0, &ui->vm.open);
+            ImGui::MenuItem("Variables", 0, &ui->vars.open);
             ImGui::MenuItem("Display", 0, &ui->display.open);
             ImGui::EndMenu();
         }
@@ -225,7 +225,7 @@ static void _ui_game_update_fbs(ui_game_t* ui) {
 }
 
 static void _ui_game_draw_vm(ui_game_t* ui) {
-    if (!ui->vm.open) {
+    if (!ui->vars.open) {
         return;
     }
     struct { int var; const char* str; } var_names[] = {
@@ -244,10 +244,10 @@ static void _ui_game_draw_vm(ui_game_t* ui) {
     };
     const int var_names_size = sizeof(var_names) / sizeof(var_names[0]);
 
-    ImGui::SetNextWindowPos(ImVec2((float)ui->vm.x, (float)ui->vm.y), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2((float)ui->vm.w, (float)ui->vm.h), ImGuiCond_FirstUseEver);
-    if (ImGui::Begin("Virtual machine", &ui->vm.open)) {
-        if (ImGui::CollapsingHeader("Variables", ImGuiTreeNodeFlags_DefaultOpen)) {
+    ImGui::SetNextWindowPos(ImVec2((float)ui->vars.x, (float)ui->vars.y), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2((float)ui->vars.w, (float)ui->vars.h), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Variables", &ui->vars.open)) {
+        if (ImGui::BeginTable("##vars", 2, ImGuiTableFlags_Resizable | ImGuiTableFlags_NoSavedSettings)) {
             char tmp[16];
             for(int i=0; i<256; i++) {
                 const char* s = NULL;
@@ -261,8 +261,17 @@ static void _ui_game_draw_vm(ui_game_t* ui) {
                     snprintf(tmp, 16, "v%u", i);
                     s = tmp;
                 }
-                ImGui::Text("%s = %d", s, ui->game->vm.vars[i]);
+                
+                ImGui::PushID(i);
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::Text("%s", s);
+                ImGui::TableNextColumn();
+                ImGui::DragScalar("##value", ImGuiDataType_S16, &ui->game->vm.vars[i]);
+                ImGui::TableNextColumn();
+                ImGui::PopID();
             }
+            ImGui::EndTable();
         }
     }
     ImGui::End();
@@ -277,8 +286,8 @@ static void _ui_game_draw_tasks(ui_game_t* ui) {
     const ImU32 active_color = 0xFF00FFFF;
     const ImU32 normal_color = 0xFFFFFFFF;
 
-    ImGui::SetNextWindowPos(ImVec2((float)ui->vm.x, (float)ui->vm.y), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2((float)ui->vm.w, (float)ui->vm.h), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos(ImVec2((float)ui->vars.x, (float)ui->vars.y), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2((float)ui->vars.w, (float)ui->vars.h), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Tasks", &ui->tasks.open)) {
         for(int i=0; i<GAME_NUM_TASKS; i++) {
             uint16_t offset = ui->game->vm.tasks[i].pc;
@@ -931,10 +940,10 @@ void ui_game_init(ui_game_t* ui, const ui_game_desc_t* ui_desc) {
         ui->res.data.poly.zoom = 64;
     }
     {
-        ui->vm.x = 10;
-        ui->vm.y = 20;
-        ui->vm.w = 562;
-        ui->vm.h = 568;
+        ui->vars.x = 10;
+        ui->vars.y = 20;
+        ui->vars.w = 562;
+        ui->vars.h = 568;
     }
     {
         ui_display_desc_t desc = {0};
@@ -997,7 +1006,7 @@ void ui_game_save_settings(ui_game_t* ui, ui_settings_t* settings) {
     ui_dbg_save_settings(&ui->dbg, settings);
     ui_settings_add(settings, "Video", ui->video.open);
     ui_settings_add(settings, "Resources", ui->res.open);
-    ui_settings_add(settings, "Virtual machine", ui->vm.open);
+    ui_settings_add(settings, "Variables", ui->vars.open);
     ui_settings_add(settings, "Tasks", ui->tasks.open);
     ui_settings_add(settings, "Display", ui->display.open);
 }
@@ -1010,7 +1019,7 @@ void ui_game_load_settings(ui_game_t* ui, const ui_settings_t* settings) {
     ui_dbg_load_settings(&ui->dbg, settings);
     ui->video.open = ui_settings_isopen(settings, "Video");
     ui->res.open = ui_settings_isopen(settings, "Resources");
-    ui->vm.open = ui_settings_isopen(settings, "Virtual machine");
+    ui->vars.open = ui_settings_isopen(settings, "Variables");
     ui->tasks.open = ui_settings_isopen(settings, "Tasks");
     ui->display.open = ui_settings_isopen(settings, "Display");
 }
