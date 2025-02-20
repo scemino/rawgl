@@ -101,6 +101,12 @@ typedef struct {
 } ui_game_vm_t;
 
 typedef struct {
+    int x, y;
+    int w, h;
+    bool open;
+} ui_game_tasks_t;
+
+typedef struct {
     game_t* game;
     ui_dbg_texture_callbacks_t dbg_texture;     // debug texture create/update/destroy callbacks
     ui_dbg_keys_desc_t dbg_keys;                // user-defined hotkeys for ui_dbg_t
@@ -113,6 +119,7 @@ typedef struct {
     ui_display_t display;
     ui_game_res_t res;
     ui_game_vm_t vm;
+    ui_game_tasks_t tasks;
     ui_dbg_t dbg;
     ui_snapshot_t snapshot;
     ui_dasm_t dasm[4];
@@ -192,6 +199,7 @@ static void _ui_game_draw_menu(ui_game_t* ui) {
         if (ImGui::BeginMenu("Debug")) {
             ImGui::MenuItem("CPU Debugger", 0, &ui->dbg.ui.open);
             ImGui::MenuItem("Breakpoints", 0, &ui->dbg.ui.show_breakpoints);
+            ImGui::MenuItem("Tasks", 0, &ui->tasks.open);
             ImGui::MenuItem("Execution History", 0, &ui->dbg.ui.show_history);
             if (ImGui::BeginMenu("Disassembler")) {
                 ImGui::MenuItem("Window #1", 0, &ui->dasm[0].open);
@@ -256,30 +264,41 @@ static void _ui_game_draw_vm(ui_game_t* ui) {
                 ImGui::Text("%s = %d", s, ui->game->vm.vars[i]);
             }
         }
-        if (ImGui::CollapsingHeader("Tasks", ImGuiTreeNodeFlags_DefaultOpen)) {
-            if (ImGui::BeginTable("##tasks", 6, ImGuiTableFlags_Resizable | ImGuiTableFlags_NoSavedSettings)) {
-                const ImU32 active_color = 0xFF00FFFF;
-                const ImU32 normal_color = 0xFFFFFFFF;
+    }
+    ImGui::End();
+}
 
-                ImGui::TableSetupColumn("#");
-                ImGui::TableSetupColumn("offset");
-                ImGui::TableHeadersRow();
+static void _ui_game_draw_tasks(ui_game_t* ui) {
 
-                for(int i=0; i<GAME_NUM_TASKS; i++) {
-                    uint16_t offset = ui->game->vm.tasks[i].pc;
+    if (!ui->tasks.open) {
+        return;
+    }
 
-                    if(offset == 0xffff) continue;
+    const ImU32 active_color = 0xFF00FFFF;
+    const ImU32 normal_color = 0xFFFFFFFF;
 
-                    ImGui::TableNextRow();
-                    ImGui::TableNextColumn();
-                    ImGui::PushID(i);
-                    ImGui::PushStyleColor(ImGuiCol_Text, ui->game->vm.current_task == i?active_color:normal_color);
-                    ImGui::Text("%u", i); ImGui::TableNextColumn();
-                    ImGui::Text("%04X", offset); ImGui::TableNextColumn();
-                    ImGui::PopStyleColor();
-                    ImGui::PopID();
-                }
-                ImGui::EndTable();
+    ImGui::SetNextWindowPos(ImVec2((float)ui->vm.x, (float)ui->vm.y), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2((float)ui->vm.w, (float)ui->vm.h), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Tasks", &ui->tasks.open)) {
+        for(int i=0; i<GAME_NUM_TASKS; i++) {
+            uint16_t offset = ui->game->vm.tasks[i].pc;
+            if(offset == 0xffff) continue;
+            
+            const bool is_active = ui->game->vm.current_task == i;
+
+            ImGui::PushID(i);
+            ImGui::PushStyleColor(ImGuiCol_Text, is_active ? active_color : normal_color);
+            ImGui::Text("Task: %02d  Offset: %04X", i, offset);
+            ImGui::PopStyleColor();
+            ImGui::PopID();
+        }
+        ImGui::Separator();
+        if(ui->game->vm.stack_ptr) {
+            ImGui::Text("Callstack (Task %02d)", ui->game->vm.current_task);
+            uint16_t offset = ui->game->vm.tasks[ui->game->vm.current_task].pc;
+            ImGui::Text("Offset: %04X", offset);
+            for(int j=0; j<ui->game->vm.stack_ptr; j++) {
+                ImGui::Text("Offset: %04X", ui->game->vm.stack_calls[j]);
             }
         }
     }
@@ -822,10 +841,10 @@ static void _ui_game_draw_video(ui_game_t* ui) {
 static uint8_t _ui_raw_mem_read(int layer, uint16_t addr, bool* valid, void* user_data) {
     GAME_ASSERT(user_data);
     (void)layer;
-    ui_game_t* ui = (ui_game_t*) user_data;
-    uint8_t* pc = ui->game->res.seg_code;
+    game_t* game = (game_t*) user_data;
+    uint8_t* pc = game->res.seg_code;
     *valid = false;
-    if (pc != NULL && addr >= 0 && addr < ui->game->res.seg_code_size) {
+    if (pc != NULL && addr >= 0 && addr < game->res.seg_code_size) {
         *valid = true;
         return pc[addr];
     }
@@ -834,17 +853,17 @@ static uint8_t _ui_raw_mem_read(int layer, uint16_t addr, bool* valid, void* use
 
 static const char* _ui_raw_getstr(uint16_t id, void* user_data) {
     GAME_ASSERT(user_data);
-    ui_game_t* ui = (ui_game_t*) user_data;
-    return game_get_string(ui->game, id);
+    game_t* game = (game_t*) user_data;
+    return game_get_string(game, id);
 }
 
 static uint8_t _ui_raw_dasm_read(int layer, uint16_t addr, bool* valid, void* user_data) {
     GAME_ASSERT(user_data);
     (void)layer;
-    ui_game_t* ui = (ui_game_t*) user_data;
-    uint8_t* pc = ui->res.data.code.buf;
+    game_t* game = (game_t*) user_data;
+    uint8_t* pc = game->res.seg_code;
     *valid = false;
-    if (pc != NULL && addr >= 0 && addr < ui->res.data.code.size) {
+    if (pc != NULL && addr >= 0 && addr < game->res.seg_code_size) {
         *valid = true;
         return pc[addr];
     }
@@ -865,7 +884,7 @@ void ui_game_init(ui_game_t* ui, const ui_game_desc_t* ui_desc) {
         desc.getstr_cb = _ui_raw_getstr;
         desc.texture_cbs = ui_desc->dbg_texture;
         desc.keys = ui_desc->dbg_keys;
-        desc.user_data = ui;
+        desc.user_data = ui->game;
         ui_dbg_init(&ui->dbg, &desc);
     }
     int x = 20, y = 20, dx = 10, dy = 10;
@@ -952,6 +971,7 @@ void ui_game_draw(ui_game_t* ui, const ui_game_frame_t* frame) {
     _ui_game_draw_resources(ui);
     _ui_game_draw_video(ui);
     _ui_game_draw_vm(ui);
+    _ui_game_draw_tasks(ui);
     for (int i = 0; i < 4; i++) {
         ui_dasm_draw(&ui->dasm[i]);
     }
@@ -978,6 +998,7 @@ void ui_game_save_settings(ui_game_t* ui, ui_settings_t* settings) {
     ui_settings_add(settings, "Video", ui->video.open);
     ui_settings_add(settings, "Resources", ui->res.open);
     ui_settings_add(settings, "Virtual machine", ui->vm.open);
+    ui_settings_add(settings, "Tasks", ui->tasks.open);
     ui_settings_add(settings, "Display", ui->display.open);
 }
 
@@ -990,6 +1011,7 @@ void ui_game_load_settings(ui_game_t* ui, const ui_settings_t* settings) {
     ui->video.open = ui_settings_isopen(settings, "Video");
     ui->res.open = ui_settings_isopen(settings, "Resources");
     ui->vm.open = ui_settings_isopen(settings, "Virtual machine");
+    ui->tasks.open = ui_settings_isopen(settings, "Tasks");
     ui->display.open = ui_settings_isopen(settings, "Display");
 }
 
