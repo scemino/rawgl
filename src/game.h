@@ -108,6 +108,12 @@ extern "C" {
 // bump when game_t memory layout changes
 #define GAME_SNAPSHOT_VERSION           (0x0001)
 
+typedef struct game_allocator {
+    void* (*alloc_fn)(size_t size, void* user_data);
+    void (*free_fn)(void* ptr, void* user_data);
+    void* user_data;
+} game_allocator;
+
 typedef enum  {
     GAME_LANG_FR,
     GAME_LANG_US
@@ -232,6 +238,7 @@ typedef struct {
     game_audio_desc_t   audio;
     game_debug_t        debug;
     game_data_t         data;
+    game_allocator      allocator;              // optional memory allocation overrides (default: malloc/free)
 } game_desc_t;
 
 typedef struct {
@@ -353,7 +360,8 @@ typedef struct {
         } demo_joy;
     } input;
 
-    const char* title;      // title of the game
+    const char*     title;      // title of the game
+    game_allocator  allocator;  // optional memory allocation overrides (default: malloc/free)
 } game_t;
 
 gfx_display_info_t game_display_info(game_t* game);
@@ -414,6 +422,9 @@ const char* game_get_string(game_t* game, uint16_t id);
 
 #define _GAME_DEFAULT(val,def) (((val) != 0) ? (val) : (def))
 #define _ARRAYSIZE(a) (sizeof(a)/sizeof(a[0]))
+
+static void* _game_malloc(game_t* game, size_t size);
+static void _game_free(game_t* game, void* ptr);
 
 typedef struct {
     int16_t x, y;
@@ -2094,7 +2105,7 @@ static void _clut(const uint8_t *src, const uint8_t *pal, int w, int h, int bpp,
     }
 }
 
-static uint8_t* _decode_bitmap(const uint8_t *src, int *w, int *h) {
+static uint8_t* _decode_bitmap(game_t* game, const uint8_t *src, int *w, int *h) {
     if (memcmp(src, "BM", 2) != 0) {
         return 0;
     }
@@ -2108,7 +2119,7 @@ static uint8_t* _decode_bitmap(const uint8_t *src, int *w, int *h) {
         return 0;
     }
     const int bpp = 3;
-    uint8_t *dst = (uint8_t *)malloc(width * height * bpp);
+    uint8_t *dst = (uint8_t *)_game_malloc(game, width * height * bpp);
     if (!dst) {
         _warning("Failed to allocate bitmap buffer, width %d height %d bpp %d", width, height, bpp);
         return 0;
@@ -2146,10 +2157,10 @@ static void _game_video_copy_bitmap_ptr(game_t* game, const uint8_t *src) {
         _game_video_scale_bitmap(game, temp_bitmap, _GFX_FMT_CLUT);
     } else { // .BMP
         int w, h;
-        uint8_t *buf = _decode_bitmap(src, &w, &h);
+        uint8_t *buf = _decode_bitmap(game, src, &w, &h);
         if (buf) {
             _game_gfx_draw_bitmap(game, game->video.buffers[0], buf, w, h, _GFX_FMT_RGB);
-            free(buf);
+            _game_free(game, buf);
         }
     }
 }
@@ -3309,6 +3320,7 @@ void game_init(game_t* game, const game_desc_t* desc) {
     if (desc->debug.callback.func) { GAME_ASSERT(desc->debug.stopped); }
     memset(game, 0, sizeof(game_t));
     game->valid = true;
+    game->allocator = desc->allocator;
     game->enable_protection = desc->enable_protection;
     game->debug = desc->debug;
     game->part_num = desc->part_num;
@@ -3577,6 +3589,29 @@ bool game_part_exists(const game_t* game, int part) {
         return true;
     }
     return false;
+}
+
+static void* _game_malloc(game_t* game, size_t size) {
+    GAME_ASSERT(size > 0);
+    void* ptr;
+    if (game->allocator.alloc_fn) {
+        ptr = game->allocator.alloc_fn(size, game->allocator.user_data);
+    } else {
+        ptr = malloc(size);
+    }
+    if (0 == ptr) {
+        abort();
+    }
+    return ptr;
+}
+
+static void _game_free(game_t* game, void* ptr) {
+    if (game->allocator.free_fn) {
+        game->allocator.free_fn(ptr, game->allocator.user_data);
+    }
+    else {
+        free(ptr);
+    }
 }
 
 #endif /* GAME_IMPL */
