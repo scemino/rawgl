@@ -6,6 +6,7 @@
 #include <stddef.h>
 #include "gfx.h"
 #include "game.h"
+#include "sokol_time.h"
 #define GAME_UI_IMPL
 #include "imgui.h"
 #include "imgui_internal.h"

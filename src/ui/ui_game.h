@@ -107,6 +107,12 @@ typedef struct {
 } ui_game_tasks_t;
 
 typedef struct {
+    int         x, y;
+    int         w, h;
+    bool        open;
+} ui_game_inputs_t;
+
+typedef struct {
     game_t* game;
     ui_dbg_texture_callbacks_t dbg_texture;     // debug texture create/update/destroy callbacks
     ui_dbg_keys_desc_t dbg_keys;                // user-defined hotkeys for ui_dbg_t
@@ -120,6 +126,7 @@ typedef struct {
     ui_game_res_t res;
     ui_game_vars_t vars;
     ui_game_tasks_t tasks;
+    ui_game_inputs_t inputs;
     ui_dbg_t dbg;
     ui_snapshot_t snapshot;
     ui_dasm_t dasm[4];
@@ -192,7 +199,7 @@ static void _ui_game_draw_menu(ui_game_t* ui) {
         if (ImGui::BeginMenu("Info")) {
             ImGui::MenuItem("Video Hardware", 0, &ui->video.open);
             ImGui::MenuItem("Resource", 0, &ui->res.open);
-            ImGui::MenuItem("Variables", 0, &ui->vars.open);
+            ImGui::MenuItem("Inputs", 0, &ui->inputs.open);
             ImGui::MenuItem("Display", 0, &ui->display.open);
             ImGui::EndMenu();
         }
@@ -200,6 +207,7 @@ static void _ui_game_draw_menu(ui_game_t* ui) {
             ImGui::MenuItem("CPU Debugger", 0, &ui->dbg.ui.open);
             ImGui::MenuItem("Breakpoints", 0, &ui->dbg.ui.show_breakpoints);
             ImGui::MenuItem("Tasks", 0, &ui->tasks.open);
+            ImGui::MenuItem("Variables", 0, &ui->vars.open);
             ImGui::MenuItem("Execution History", 0, &ui->dbg.ui.show_history);
             if (ImGui::BeginMenu("Disassembler")) {
                 ImGui::MenuItem("Window #1", 0, &ui->dasm[0].open);
@@ -278,7 +286,6 @@ static void _ui_game_draw_vm(ui_game_t* ui) {
 }
 
 static void _ui_game_draw_tasks(ui_game_t* ui) {
-
     if (!ui->tasks.open) {
         return;
     }
@@ -286,8 +293,8 @@ static void _ui_game_draw_tasks(ui_game_t* ui) {
     const ImU32 active_color = 0xFF00FFFF;
     const ImU32 normal_color = 0xFFFFFFFF;
 
-    ImGui::SetNextWindowPos(ImVec2((float)ui->vars.x, (float)ui->vars.y), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2((float)ui->vars.w, (float)ui->vars.h), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos(ImVec2((float)ui->tasks.x, (float)ui->tasks.y), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2((float)ui->tasks.w, (float)ui->tasks.h), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Tasks", &ui->tasks.open)) {
         for(int i=0; i<GAME_NUM_TASKS; i++) {
             uint16_t offset = ui->game->vm.tasks[i].pc;
@@ -310,6 +317,25 @@ static void _ui_game_draw_tasks(ui_game_t* ui) {
                 ImGui::Text("Offset: %04X", ui->game->vm.stack_calls[j]);
             }
         }
+    }
+    ImGui::End();
+}
+
+static void _ui_game_draw_inputs(ui_game_t* ui) {
+    if (!ui->inputs.open) {
+        return;
+    }
+
+    ImGui::SetNextWindowPos(ImVec2((float)ui->inputs.x, (float)ui->inputs.y), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2((float)ui->inputs.w, (float)ui->inputs.h), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Inputs", &ui->inputs.open)) {
+        ImGui::Text("dir_mask: %u", ui->game->input.dir_mask);
+        ImGui::Text("action: %s", ui->game->input.action ? "ON" : "OFF");
+        ImGui::Text("code: %s", ui->game->input.code ? "ON" : "OFF");
+        ImGui::Text("pause: %s", ui->game->input.pause ? "ON" : "OFF");
+        ImGui::Text("quit: %s", ui->game->input.quit ? "ON" : "OFF");
+        ImGui::Text("back: %s", ui->game->input.back ? "ON" : "OFF");
+        ImGui::Text("last_char: %c", ui->game->input.last_char);
     }
     ImGui::End();
 }
@@ -981,6 +1007,7 @@ void ui_game_draw(ui_game_t* ui, const ui_game_frame_t* frame) {
     _ui_game_draw_video(ui);
     _ui_game_draw_vm(ui);
     _ui_game_draw_tasks(ui);
+    _ui_game_draw_inputs(ui);
     for (int i = 0; i < 4; i++) {
         ui_dasm_draw(&ui->dasm[i]);
     }
@@ -1008,6 +1035,7 @@ void ui_game_save_settings(ui_game_t* ui, ui_settings_t* settings) {
     ui_settings_add(settings, "Resources", ui->res.open);
     ui_settings_add(settings, "Variables", ui->vars.open);
     ui_settings_add(settings, "Tasks", ui->tasks.open);
+    ui_settings_add(settings, "Inputs", ui->inputs.open);
     ui_settings_add(settings, "Display", ui->display.open);
 }
 
@@ -1021,6 +1049,7 @@ void ui_game_load_settings(ui_game_t* ui, const ui_settings_t* settings) {
     ui->res.open = ui_settings_isopen(settings, "Resources");
     ui->vars.open = ui_settings_isopen(settings, "Variables");
     ui->tasks.open = ui_settings_isopen(settings, "Tasks");
+    ui->inputs.open = ui_settings_isopen(settings, "Inputs");
     ui->display.open = ui_settings_isopen(settings, "Display");
 }
 
