@@ -113,6 +113,14 @@ typedef struct {
 } ui_game_inputs_t;
 
 typedef struct {
+    int             x, y;
+    int             w, h;
+    bool            open;
+    const float*    sample_buffer;  /* pointer to audio sample buffer */
+    int*            num_samples;    /* max number of samples in sample buffer */
+} ui_game_audio_t;
+
+typedef struct {
     game_t* game;
     ui_dbg_texture_callbacks_t dbg_texture;     // debug texture create/update/destroy callbacks
     ui_dbg_keys_desc_t dbg_keys;                // user-defined hotkeys for ui_dbg_t
@@ -120,16 +128,17 @@ typedef struct {
 } ui_game_desc_t;
 
 typedef struct {
-    game_t* game;
-    ui_game_video_t video;
-    ui_display_t display;
-    ui_game_res_t res;
-    ui_game_vars_t vars;
-    ui_game_tasks_t tasks;
-    ui_game_inputs_t inputs;
-    ui_dbg_t dbg;
-    ui_snapshot_t snapshot;
-    ui_dasm_t dasm[4];
+    game_t*             game;
+    ui_game_video_t     video;
+    ui_display_t        display;
+    ui_game_res_t       res;
+    ui_game_vars_t      vars;
+    ui_game_tasks_t     tasks;
+    ui_game_inputs_t    inputs;
+    ui_game_audio_t     audio;
+    ui_dbg_t            dbg;
+    ui_snapshot_t       snapshot;
+    ui_dasm_t           dasm[4];
 } ui_game_t;
 
 typedef struct {
@@ -200,6 +209,7 @@ static void _ui_game_draw_menu(ui_game_t* ui) {
             ImGui::MenuItem("Video Hardware", 0, &ui->video.open);
             ImGui::MenuItem("Resource", 0, &ui->res.open);
             ImGui::MenuItem("Inputs", 0, &ui->inputs.open);
+            ImGui::MenuItem("Audio", 0, &ui->audio.open);
             ImGui::MenuItem("Display", 0, &ui->display.open);
             ImGui::EndMenu();
         }
@@ -837,6 +847,19 @@ static void _ui_game_draw_resources(ui_game_t* ui) {
     ImGui::End();
 }
 
+static void _ui_game_draw_audio(ui_game_t* ui) {
+    if (!ui->audio.open) {
+        return;
+    }
+    ImGui::SetNextWindowPos(ImVec2((float)ui->audio.x, (float)ui->audio.y), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2((float)ui->audio.w, (float)ui->audio.h), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Audio", &ui->audio.open)) {
+        const ImVec2 area = ImGui::GetContentRegionAvail();
+        ImGui::PlotLines("##samples", ui->audio.sample_buffer, *ui->audio.num_samples, 0, 0, -1.0f, +1.0f, area);
+    }
+    ImGui::End();
+}
+
 static void _ui_game_draw_video(ui_game_t* ui) {
     if (!ui->video.open) {
         return;
@@ -982,6 +1005,8 @@ void ui_game_init(ui_game_t* ui, const ui_game_desc_t* ui_desc) {
     }
     ui->res.tex_bmp = ui->video.texture_cbs.create_cb(GAME_WIDTH, GAME_HEIGHT);
     ui->res.tex_fb = ui->video.texture_cbs.create_cb(GAME_WIDTH, GAME_HEIGHT);
+    ui->audio.sample_buffer = ui->game->audio.sample_buffer;
+    ui->audio.num_samples = &ui->game->audio.num_samples;
 }
 
 void ui_game_discard(ui_game_t* ui) {
@@ -1008,6 +1033,7 @@ void ui_game_draw(ui_game_t* ui, const ui_game_frame_t* frame) {
     _ui_game_draw_vm(ui);
     _ui_game_draw_tasks(ui);
     _ui_game_draw_inputs(ui);
+    _ui_game_draw_audio(ui);
     for (int i = 0; i < 4; i++) {
         ui_dasm_draw(&ui->dasm[i]);
     }
@@ -1036,6 +1062,7 @@ void ui_game_save_settings(ui_game_t* ui, ui_settings_t* settings) {
     ui_settings_add(settings, "Variables", ui->vars.open);
     ui_settings_add(settings, "Tasks", ui->tasks.open);
     ui_settings_add(settings, "Inputs", ui->inputs.open);
+    ui_settings_add(settings, "Audio", ui->audio.open);
     ui_settings_add(settings, "Display", ui->display.open);
 }
 
@@ -1050,6 +1077,7 @@ void ui_game_load_settings(ui_game_t* ui, const ui_settings_t* settings) {
     ui->vars.open = ui_settings_isopen(settings, "Variables");
     ui->tasks.open = ui_settings_isopen(settings, "Tasks");
     ui->inputs.open = ui_settings_isopen(settings, "Inputs");
+    ui->audio.open = ui_settings_isopen(settings, "Audio");
     ui->display.open = ui_settings_isopen(settings, "Display");
 }
 

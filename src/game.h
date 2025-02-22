@@ -311,6 +311,7 @@ typedef struct {
 
     struct {
         float                   sample_buffer[GAME_MAX_AUDIO_SAMPLES];
+        int                     num_samples;
         int16_t                 samples[GAME_MIX_BUF_SIZE];
         game_audio_channel_t    channels[GAME_MIX_CHANNELS];
         game_audio_sfx_player_t sfx_player;
@@ -3441,6 +3442,7 @@ void game_exec(game_t* game, uint32_t ms) {
     const int num_frames = saudio_expect();
     if (num_frames > 0) {
         const int num_samples = num_frames * saudio_channels();
+        game->audio.num_samples = num_samples;
         _game_audio_update(game, num_samples);
     }
 
