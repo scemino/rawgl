@@ -899,10 +899,10 @@ static void _ui_game_draw_video(ui_game_t* ui) {
 static uint8_t _ui_raw_mem_read(int layer, uint16_t addr, bool* valid, void* user_data) {
     GAME_ASSERT(user_data);
     (void)layer;
-    game_t* game = (game_t*) user_data;
-    uint8_t* pc = game->res.seg_code;
+    ui_game_t* ui = (ui_game_t*) user_data;
+    uint8_t* pc = ui->game->res.seg_code;
     *valid = false;
-    if (pc != NULL && addr >= 0 && addr < game->res.seg_code_size) {
+    if (pc != NULL && addr >= 0 && addr < ui->game->res.seg_code_size) {
         *valid = true;
         return pc[addr];
     }
@@ -911,17 +911,17 @@ static uint8_t _ui_raw_mem_read(int layer, uint16_t addr, bool* valid, void* use
 
 static const char* _ui_raw_getstr(uint16_t id, void* user_data) {
     GAME_ASSERT(user_data);
-    game_t* game = (game_t*) user_data;
-    return game_get_string(game, id);
+    ui_game_t* ui = (ui_game_t*) user_data;
+    return game_get_string(ui->game, id);
 }
 
 static uint8_t _ui_raw_dasm_read(int layer, uint16_t addr, bool* valid, void* user_data) {
     GAME_ASSERT(user_data);
     (void)layer;
-    game_t* game = (game_t*) user_data;
-    uint8_t* pc = game->res.seg_code;
+    ui_game_t* ui = (ui_game_t*) user_data;
+    uint8_t* pc = ui->game->res.seg_code;
     *valid = false;
-    if (pc != NULL && addr >= 0 && addr < game->res.seg_code_size) {
+    if (pc != NULL && addr >= 0 && addr < ui->game->res.seg_code_size) {
         *valid = true;
         return pc[addr];
     }
@@ -942,7 +942,7 @@ void ui_game_init(ui_game_t* ui, const ui_game_desc_t* ui_desc) {
         desc.getstr_cb = _ui_raw_getstr;
         desc.texture_cbs = ui_desc->dbg_texture;
         desc.keys = ui_desc->dbg_keys;
-        desc.user_data = ui->game;
+        desc.user_data = ui;
         ui_dbg_init(&ui->dbg, &desc);
     }
     int x = 20, y = 20, dx = 10, dy = 10;

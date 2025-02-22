@@ -133,8 +133,6 @@ static void _raw_dasm_u16(uint16_t val, raw_dasm_output_t out_cb, void* user_dat
 
 /* main disassembler function */
 uint16_t raw_dasm_op(uint16_t pc, raw_dasm_input_t in_cb, raw_dasm_output_t out_cb, raw_getstrt_t get_str_cb, void* user_data) {
-    game_t* game = (game_t*)user_data;
-    GAME_ASSERT(game);
     GAME_ASSERT(in_cb);
     uint8_t op;
     uint8_t u8; uint16_t u16; int16_t i16;

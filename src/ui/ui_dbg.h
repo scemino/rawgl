@@ -1080,9 +1080,7 @@ static bool _ui_dbg_line_array_needs_update(ui_dbg_t* win, uint16_t addr) {
 }
 
 static void _ui_dbg_draw_main(ui_dbg_t* win) {
-    game_t* game = (game_t*)win->user_data;
     const float line_height = ImGui::GetTextLineHeight();
-    ImGui::Text("Task: %u", game->vm.current_task);
     ImGui::SetNextWindowContentSize(ImVec2(0, UI_DBG_NUM_LINES * line_height));
     ImGui::BeginChild("##main", ImGui::GetContentRegionAvail(), false);
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0,0));
