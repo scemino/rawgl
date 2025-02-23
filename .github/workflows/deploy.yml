@@ -30,7 +30,7 @@ jobs:
       - uses: actions/checkout@main
         with:
           repository: scemino/raw_wp
-          ssh-key: ${{ secrets.SSH_PRIVATE_KEY }}
+          token: ${{ secrets.GHACTION_PUSH}}
       - uses: actions/download-artifact@main
         with:
           name: webpage
